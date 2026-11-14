@@ -2,7 +2,7 @@
 import { useState } from "react";
 import { useTranslation } from "../i18n/LanguageContext";
 import NewsImage from "./NewsImage";
-import newsData from "../data/news";
+import { getNews } from "../data/newsStore";
 import { Button, Container, PageHeader, SubNav } from "./ui";
 
 /**
@@ -17,7 +17,8 @@ import { Button, Container, PageHeader, SubNav } from "./ui";
  *
  * Gde se ubacuje: ruta /novosti (vidi App.jsx).
  */
-export default function News({ items = newsData, initialQuery = "", onNavigate = () => {} }) {
+export default function News({ items: itemsProp, initialQuery = "", onNavigate = () => {} }) {
+  const items = itemsProp || getNews();
   const { t, lang } = useTranslation();
   const tr = (field) => (typeof field === "string" ? field : field[lang] || field.SR);
   const hrefOf = (item) => `/novosti/${item.slug}`;

@@ -13,7 +13,7 @@ import {
 } from "../data/invoicesStore";
 import InvoiceModal from "./InvoiceModal";
 import NewInvoiceModal from "./NewInvoiceModal";
-import { PageHeader, PrimaryButton, SecondaryButton, PlusIcon } from "./admin/ui";
+import { PageHeader, PrimaryButton, SecondaryButton, PlusIcon, Card } from "./admin/ui";
 
 export default function FinancesSection({ candidates: propCandidates = [] }) {
   const candidates = propCandidates.length ? propCandidates : getCandidates();
@@ -121,7 +121,7 @@ export default function FinancesSection({ candidates: propCandidates = [] }) {
             <SecondaryButton onClick={() => window.print()}>Štampaj knjigu</SecondaryButton>
             <PrimaryButton onClick={() => setShowNewModal(true)}>
               <PlusIcon />
-              Izdaj novu fakturu
+              Izdaj račun
             </PrimaryButton>
           </div>
         }
@@ -135,88 +135,55 @@ export default function FinancesSection({ candidates: propCandidates = [] }) {
           { label: "Potraživanja na čekanju", value: formatRsd(stats.totalPendingRsd), note: "Izdate uplatnice, rok 7 dana", dot: "bg-brand" },
           { label: "PKZ — odloženo (SAD)", value: formatRsd(stats.totalPkzRsd), note: "Otplata kroz III ratu tokom leta" },
         ].map((k) => (
-          <div key={k.label} className="rounded-2xl border border-line bg-white px-5 py-4">
+          <Card key={k.label} className="px-5 py-4">
             <p className="flex items-center gap-2 text-[13px] text-ink-3">
               {k.dot && <span className={`h-2 w-2 rounded-full ${k.dot}`} aria-hidden="true" />}
               {k.label}
             </p>
-            <p className="mt-1.5 font-display text-2xl font-bold tabular-nums text-ink">{k.value}</p>
+            <p className="mt-1.5 text-2xl font-semibold tabular-nums text-ink">{k.value}</p>
             <p className="mt-1 text-xs text-ink-3">{k.note}</p>
-          </div>
+          </Card>
         ))}
       </div>
 
       {/* Filteri i pretraga */}
-      <div className="rounded-2xl border border-line bg-white p-4 space-y-3">
-        <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
-          <div className="relative w-full sm:max-w-md">
-            <svg
-              className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-neutral-400"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-            >
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-            </svg>
-            <input
-              type="text"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Pretraga po broju računa (FAKT-), kandidatu, JMBG-u, svrsi..."
-              className="w-full rounded-xl border border-line-strong bg-surface py-2 pl-9 pr-3 text-xs text-ink placeholder:text-ink-3/70 focus:bg-white focus:border-ink focus:outline-hidden"
-            />
-          </div>
-
-          <div className="flex flex-wrap items-center gap-1.5 w-full sm:w-auto">
-            <span className="text-xs font-semibold text-ink-3 mr-1">Status:</span>
-            {[
-              ["ALL", "Sve"],
-              ["PAID", "Plaćeno"],
-              ["PENDING", "Na čekanju"],
-              ["PKZ_DEFERRED", "PKZ Model"],
-              ["CANCELLED", "Stornirano"],
-            ].map(([st, lbl]) => (
-              <button
-                key={st}
-                type="button"
-                onClick={() => setStatusFilter(st)}
-                className={`rounded-lg px-2.5 py-1 text-xs font-semibold transition-colors ${
-                  statusFilter === st
-                    ? "bg-ink text-white"
-                    : "bg-surface-2 text-ink-2 hover:bg-neutral-200"
-                }`}
-              >
-                {lbl}
-              </button>
-            ))}
-          </div>
+      <Card className="space-y-3 p-4 sm:p-5">
+        <div className="relative w-full sm:max-w-md">
+          <svg className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+          </svg>
+          <input
+            type="search"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Broj računa, kandidat, JMBG ili svrha"
+            aria-label="Pretraga računa"
+            className="w-full rounded-full border border-line-strong bg-white py-2.5 pl-10 pr-4 text-sm text-ink placeholder:text-ink-3/70 focus:border-ink focus:outline-hidden"
+          />
         </div>
-
-        <div className="flex flex-wrap items-center gap-1.5 pt-2 border-t border-line">
-          <span className="text-xs font-semibold text-ink-3 mr-1">Vrsta uplate:</span>
-          {[
-            ["ALL", "Sve usluge"],
-            ["RATE_1", "I Rata"],
-            ["RATE_2", "II Rata"],
-            ["RATE_3", "III Rata"],
-            ["VISA_FEE", "MRV Viza ($185)"],
-            ["TRANSLATION", "Prevod"],
-          ].map(([sv, lbl]) => (
-            <button
-              key={sv}
-              type="button"
-              onClick={() => setServiceFilter(sv)}
-              className={`rounded-md px-2 py-0.5 text-xs font-semibold transition-colors ${
-                serviceFilter === sv
-                  ? "bg-ink text-ink font-semibold"
-                  : "bg-surface-2 text-ink-2 hover:bg-neutral-200"
-              }`}
-            >
-              {lbl}
-            </button>
-          ))}
-        </div>
-      </div>
+        {[
+          ["Status", statusFilter, setStatusFilter, [["ALL", "Svi"], ["PAID", "Plaćeno"], ["PENDING", "Na čekanju"], ["PKZ_DEFERRED", "PKZ"], ["CANCELLED", "Stornirano"]]],
+          ["Usluga", serviceFilter, setServiceFilter, [["ALL", "Sve"], ["RATE_1", "I rata"], ["RATE_2", "II rata"], ["RATE_3", "III rata"], ["VISA_FEE", "Vizna taksa"], ["TRANSLATION", "Prevod"]]],
+        ].map(([label, value, set, opts]) => (
+          <div key={label} className="flex items-center gap-3">
+            <span className="w-14 shrink-0 text-[13px] text-ink-3">{label}</span>
+            <div className="no-scrollbar -mr-4 flex gap-1 overflow-x-auto pr-4 sm:mr-0 sm:flex-wrap sm:pr-0">
+              {opts.map(([id, lbl]) => (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => set(id)}
+                  className={`shrink-0 rounded-full px-3.5 py-1.5 text-[13px] font-medium transition-colors ${
+                    value === id ? "bg-ink text-white" : "text-ink-3 hover:bg-surface hover:text-ink"
+                  }`}
+                >
+                  {lbl}
+                </button>
+              ))}
+            </div>
+          </div>
+        ))}
+      </Card>
 
       {/* KIR Tabela izdatih računa */}
       <div className="rounded-2xl border border-line bg-white overflow-hidden">

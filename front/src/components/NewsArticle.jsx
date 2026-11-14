@@ -2,7 +2,7 @@
 import { useEffect } from "react";
 import { useTranslation } from "../i18n/LanguageContext";
 import NewsImage from "./NewsImage";
-import newsData from "../data/news";
+import { getNews } from "../data/newsStore";
 import CtaBand from "./CtaBand";
 import { Button, PlaneIcon } from "./ui";
 
@@ -28,7 +28,8 @@ const BACK_LABEL = {
  *
  * Gde se ubacuje: ruta /novosti/<slug> (vidi App.jsx — prebacivanje prikaza).
  */
-export default function NewsArticle({ slug, items = newsData, onNavigate = () => {} }) {
+export default function NewsArticle({ slug, items: itemsProp, onNavigate = () => {} }) {
+  const items = itemsProp || getNews();
   const { lang } = useTranslation();
   const tr = (field) => (typeof field === "string" ? field : field?.[lang] || field?.SR);
   const item = items.find((n) => n.slug === slug);

@@ -1,116 +1,152 @@
-import { useEffect, useState } from "react";
-import { useTranslation } from "../../i18n/LanguageContext";
+// front/src/components/admin/ChatbotSection.jsx
+// Baza znanja: pitanja i odgovori koje koristi asistent na sajtu. Dodavanje, izmena i brisanje na jednom mestu.
+import { useEffect, useMemo, useState } from "react";
 import { syncFromBackend, saveFaqWithBackend } from "../../data/candidateStore";
-import {
-  PageHeader,
-  Card,
-  PrimaryButton,
-  SecondaryButton,
-  EmptyState,
-  GhostIconButton,
-  PlusIcon,
-  EditIcon,
-  TrashIcon,
-} from "./ui";
+import { SWT_FAQS } from "../../data/faq";
+import { PageHeader, Card, Field, FIELD_CLS, PrimaryButton, SecondaryButton, PlusIcon, SearchIcon, GhostIconButton, EditIcon, TrashIcon, EmptyState } from "./ui";
 
-const KB_SEED = [
-  { id: 101, q: "Koliko traje Work & Travel program?", a: "Program traje do 4 meseca rada uz dodatni period za putovanje po SAD." },
-  { id: 102, q: "Koji su uslovi za prijavu?", a: "Status redovnog studenta, poznavanje engleskog i važeći pasoš." },
-  { id: 103, q: "Da li agencija obezbeđuje posao?", a: "Da, predlažemo proverene poslodavce i pomažemo oko celokupne dokumentacije." },
-];
+const KEY = "aa_kb_v1";
+const seed = () => SWT_FAQS.map((x, i) => ({ id: 1000 + i, q: x.q, a: x.a }));
+
+function loadLocal() {
+  try {
+    const raw = localStorage.getItem(KEY);
+    const list = raw && JSON.parse(raw);
+    if (Array.isArray(list)) return list;
+  } catch {}
+  return seed();
+}
+
+function Editor({ initial, onCancel, onSave }) {
+  const [q, setQ] = useState(initial?.q || "");
+  const [a, setA] = useState(initial?.a || "");
+  return (
+    <form
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (q.trim() && a.trim()) onSave({ q: q.trim(), a: a.trim() });
+      }}
+      className="space-y-4"
+    >
+      <Field label="Pitanje">
+        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Kako ga studenti pitaju" className={FIELD_CLS} autoFocus required />
+      </Field>
+      <Field label="Odgovor">
+        <textarea value={a} onChange={(e) => setA(e.target.value)} rows={4} placeholder="Kratko i tačno — asistent odgovara baš ovim rečima." className={`${FIELD_CLS} leading-relaxed`} required />
+      </Field>
+      <div className="flex items-center justify-end gap-2">
+        <SecondaryButton onClick={onCancel}>Otkaži</SecondaryButton>
+        <PrimaryButton type="submit">Sačuvaj</PrimaryButton>
+      </div>
+    </form>
+  );
+}
 
 export default function ChatbotSection() {
-  const { t } = useTranslation();
-  const [items, setItems] = useState(KB_SEED);
-  const [q, setQ] = useState("");
-  const [a, setA] = useState("");
-  const [editingId, setEditingId] = useState(null);
+  const [items, setItems] = useState(loadLocal);
+  const [query, setQuery] = useState("");
+  const [editingId, setEditingId] = useState(null); // null | "new" | id
+  const [openId, setOpenId] = useState(null);
 
   useEffect(() => {
     syncFromBackend().then((data) => {
-      if (data?.faqItems && Array.isArray(data.faqItems)) {
-        setItems(data.faqItems);
-      }
+      if (Array.isArray(data?.faqItems) && data.faqItems.length) setItems(data.faqItems);
     });
   }, []);
 
-  const inputCls =
-    "w-full rounded-lg border border-line-strong bg-white px-3.5 py-2.5 text-sm text-ink transition-colors duration-150 placeholder:text-ink-3/70 focus:border-ink focus:outline-hidden focus:ring-2 focus:ring-ink/10";
-
-  const reset = () => {
-    setQ("");
-    setA("");
-    setEditingId(null);
-  };
-
-  const submit = async (e) => {
-    e.preventDefault();
-    if (!q.trim() || !a.trim()) return;
-    let next;
-    if (editingId) {
-      next = items.map((i) => (i.id === editingId ? { ...i, q: q.trim(), a: a.trim() } : i));
-    } else {
-      next = [...items, { id: Date.now(), q: q.trim(), a: a.trim() }];
-    }
+  const commit = async (next) => {
     setItems(next);
+    try {
+      localStorage.setItem(KEY, JSON.stringify(next));
+    } catch {}
     await saveFaqWithBackend(next);
-    reset();
   };
 
-  const edit = (item) => {
-    setEditingId(item.id);
-    setQ(item.q);
-    setA(item.a);
-  };
-
-  const remove = async (id) => {
-    const next = items.filter((i) => i.id !== id);
-    setItems(next);
-    await saveFaqWithBackend(next);
-    if (editingId === id) reset();
-  };
+  const q = query.trim().toLowerCase();
+  const list = useMemo(() => items.filter((i) => !q || `${i.q} ${i.a}`.toLowerCase().includes(q)), [items, q]);
 
   return (
     <>
-      <PageHeader title={t("admin.chatTitle")} subtitle={t("admin.chatSubtitle")} />
-
-      <Card className="max-w-2xl p-6">
-        <form onSubmit={submit} className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-ink">{t("admin.chatQuestion")}</label>
-            <input value={q} onChange={(e) => setQ(e.target.value)} className={`${inputCls} mt-1.5`} required />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-ink">{t("admin.chatAnswer")}</label>
-            <textarea value={a} onChange={(e) => setA(e.target.value)} rows={4} className={`${inputCls} mt-1.5 resize-y`} required />
-          </div>
-          <div className="flex items-center gap-2">
-            <PrimaryButton type="submit">
-              {editingId ? t("admin.save") : <><PlusIcon /> {t("admin.chatAdd")}</>}
+      <PageHeader
+        title="Baza znanja"
+        subtitle={`Odgovori koje asistent na sajtu daje posetiocima · ${items.length} pitanja`}
+        action={
+          editingId !== "new" && (
+            <PrimaryButton onClick={() => setEditingId("new")}>
+              <PlusIcon /> Novo pitanje
             </PrimaryButton>
-            {editingId && <SecondaryButton onClick={reset}>{t("admin.cancel")}</SecondaryButton>}
-          </div>
-        </form>
-      </Card>
+          )
+        }
+      />
 
-      <div className="mt-6 space-y-3">
-        {items.length === 0 ? (
-          <EmptyState>{t("admin.chatEmpty")}</EmptyState>
-        ) : (
-          items.map((item) => (
-            <Card key={item.id} className={`flex items-start justify-between gap-4 p-5 ${editingId === item.id ? "ring-2 ring-brand" : ""}`}>
-              <div className="min-w-0">
-                <p className="text-sm font-semibold text-ink">{item.q}</p>
-                <p className="mt-1 text-sm text-ink-3">{item.a}</p>
-              </div>
-              <div className="flex shrink-0 items-center">
-                <GhostIconButton label={t("admin.edit")} onClick={() => edit(item)}><EditIcon /></GhostIconButton>
-                <GhostIconButton label={t("admin.delete")} danger onClick={() => remove(item.id)}><TrashIcon /></GhostIconButton>
-              </div>
-            </Card>
-          ))
-        )}
+      {editingId === "new" && (
+        <Card className="mb-4 p-5 sm:p-6">
+          <h2 className="mb-4 text-base font-semibold text-ink">Novo pitanje</h2>
+          <Editor
+            onCancel={() => setEditingId(null)}
+            onSave={async (v) => {
+              await commit([{ id: Date.now(), ...v }, ...items]);
+              setEditingId(null);
+            }}
+          />
+        </Card>
+      )}
+
+      <div className="relative mb-4 w-full sm:max-w-md">
+        <SearchIcon className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-3" />
+        <input
+          type="search"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Pretraži pitanja i odgovore"
+          aria-label="Pretraga baze znanja"
+          className="w-full rounded-full border border-line-strong bg-white py-2.5 pl-10 pr-4 text-sm text-ink placeholder:text-ink-3/70 focus:border-ink focus:outline-hidden"
+        />
       </div>
+
+      {list.length === 0 ? (
+        <EmptyState>{items.length ? "Nema rezultata." : "Baza je prazna. Dodaj prvo pitanje."}</EmptyState>
+      ) : (
+        <Card className="overflow-hidden">
+          <ul className="divide-y divide-line">
+            {list.map((item) =>
+              editingId === item.id ? (
+                <li key={item.id} className="bg-surface px-5 py-5">
+                  <Editor
+                    initial={item}
+                    onCancel={() => setEditingId(null)}
+                    onSave={async (v) => {
+                      await commit(items.map((i) => (i.id === item.id ? { ...i, ...v } : i)));
+                      setEditingId(null);
+                    }}
+                  />
+                </li>
+              ) : (
+                <li key={item.id} className="flex items-start gap-3 px-5 py-4">
+                  <button type="button" onClick={() => setOpenId(openId === item.id ? null : item.id)} className="min-w-0 flex-1 text-left">
+                    <span className="block text-[15px] font-medium text-ink">{item.q}</span>
+                    <span className={`mt-1 block text-sm leading-relaxed text-ink-3 ${openId === item.id ? "" : "line-clamp-2"}`}>{item.a}</span>
+                  </button>
+                  <div className="-mr-2 flex shrink-0 items-center">
+                    <GhostIconButton label="Izmeni" onClick={() => setEditingId(item.id)}>
+                      <EditIcon />
+                    </GhostIconButton>
+                    <GhostIconButton
+                      label="Obriši"
+                      danger
+                      onClick={() => {
+                        if (window.confirm(`Obrisati pitanje „${item.q}“?`)) commit(items.filter((i) => i.id !== item.id));
+                      }}
+                    >
+                      <TrashIcon />
+                    </GhostIconButton>
+                  </div>
+                </li>
+              )
+            )}
+          </ul>
+        </Card>
+      )}
     </>
   );
 }
