@@ -10,3 +10,4 @@ export * from "./preApplications.js";
 export * from "./discounts.js";
 export * from "./documentsExport.js";
 export * from "./siteAndComms.js";
+export * from "./contract.js";

@@ -29,6 +29,11 @@ const ADMIN_ONLY_FIELDS = new Set([
   'contactNotes',
   'consultationStatus',
   'consultationNotes',
+  // Potpis ugovora postavlja samo server (prihvatanje u portalu ili otpremljen skeniran ugovor).
+  'contractAcceptance',
+  'contractSigned',
+  'contractSignedAt',
+  'contractSignedReference',
 ])
 
 const ADMIN_ONLY_SUFFIX =

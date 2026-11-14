@@ -1191,7 +1191,7 @@ export default function Dashboard({
           candidate={candidate}
           onClose={() => setShowSignContractModal(false)}
           onUploadSignedContract={(file) => handleUploadSignedContract(file)}
-          onUpdateCandidate={updateCandidateState}
+          onSigned={(signed) => setCandidate((prev) => ({ ...(prev || {}), ...signed }))}
           isUploading={isUploadingSignedContract}
         />
       )}

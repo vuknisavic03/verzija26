@@ -1,9 +1,13 @@
+import config from '@payload-config'
 import fs from 'node:fs'
 import path from 'node:path'
+import { getPayload } from 'payload'
+
+import { resolvePortalActor } from '@/modules/portal-sync/access.ts'
+import { buildPortalContractDraft, renderPortalContractPdf } from '@/modules/portal-sync/portalContract.ts'
+import { readPortalDocument } from '@/modules/portal-sync/portalDb.ts'
 import { getPortalState, markPortalCandidateContractDownloaded } from '@/modules/portal-sync/localStore.ts'
-import { renderContractPdf } from '@/modules/generated-contracts/renderContractPdf.ts'
 import { renderResponsibilityStatementPdf } from '@/modules/generated-contracts/renderResponsibilityStatementPdf.ts'
-import { PDFDocument } from 'pdf-lib'
 
 function findDocFile(fileName: string): Buffer | null {
   const possiblePaths = [
@@ -21,16 +25,22 @@ function findDocFile(fileName: string): Buffer | null {
 }
 
 export async function GET(request: Request) {
+  const actor = await resolvePortalActor()
+  if (actor.kind === 'anonymous') return new Response('Prijavite se ponovo.', { status: 401 })
   try {
     const url = new URL(request.url)
-    const idOrEmail = (url.searchParams.get('id') || url.searchParams.get('email') || '').trim().toLowerCase()
+    // Kandidat uvek dobija sopstveni dokument; agencija bira kandidata po ID-ju ili emailu.
+    const idOrEmail =
+      actor.kind === 'candidate'
+        ? actor.email
+        : (url.searchParams.get('id') || url.searchParams.get('email') || '').trim().toLowerCase()
     const type = (url.searchParams.get('type') || '').trim().toLowerCase()
 
     const state = await getPortalState()
     const candidate =
       state.candidates.find(
         (c) => String(c.id).toLowerCase() === idOrEmail || c.email.toLowerCase() === idOrEmail,
-      ) || state.candidates[0]
+      )
 
     if (!candidate) {
       return new Response('Kandidat nije pronađen.', { status: 404 })
@@ -39,17 +49,17 @@ export async function GET(request: Request) {
     // Mark as downloaded
     await markPortalCandidateContractDownloaded(candidate.id || candidate.email).catch(() => {})
 
-    const queryJmbg = (url.searchParams.get('jmbg') || '').trim()
-    const queryPassport = (url.searchParams.get('passport') || url.searchParams.get('passportNumber') || '').trim()
-    const queryName = (url.searchParams.get('name') || '').trim()
-
-    const candidateName = queryName || `${candidate.firstName || ''} ${candidate.lastName || ''}`.trim() || candidate.name || 'Student Kandidat'
-    const jmbg = queryJmbg || candidate.jmbg || '1508001710023'
-    const passportNumber = queryPassport || candidate.passportNumber || candidate.idCardNumber || '010948212'
-    const contractNumber = `AA-2027-${String(candidate.id).replace(/[^0-9]/g, '').slice(-4) || '1042'}`
-    const isSigned = Boolean(candidate.contractSigned)
-    const signedAt = candidate.contractSignedAt ? new Date(candidate.contractSignedAt) : isSigned ? new Date() : undefined
-    const signedReference = candidate.contractSignedReference || `AA-REF-${contractNumber}`
+    // Ugovor se uvek pravi iz sačuvanih podataka — nikad iz parametara u adresi (JMBG ne sme u URL)
+    // i nikad sa izmišljenim vrednostima.
+    const draft = buildPortalContractDraft(candidate as unknown as Record<string, unknown>)
+    const candidateName = draft.facts.candidateName || 'Kandidat'
+    const jmbg = draft.facts.jmbg
+    const passportNumber = draft.facts.passportNumber
+    const contractNumber = draft.facts.contractNumber
+    const acceptance = (candidate as unknown as { contractAcceptance?: { acceptedAt: string; documentId: number; reference: string } }).contractAcceptance
+    const isSigned = Boolean(acceptance)
+    const signedAt = acceptance ? new Date(acceptance.acceptedAt) : undefined
+    const signedReference = acceptance?.reference
 
     const isSelf = String(candidate.packageId || '').toLowerCase().includes('self') || String(candidate.packageName || '').toLowerCase().includes('self')
 
@@ -132,93 +142,37 @@ export async function GET(request: Request) {
       })
     }
 
-    // 5. Default: Kompletan ugovor sa unetim podacima kandidata i Izjavom
-    const paymentLabel =
-      candidate.paymentMethod === 'later'
-        ? 'Opcija C — Plaćanje tokom/nakon programa (PKZ uz jemca)'
-        : candidate.paymentMethod === 'installments'
-        ? 'Opcija A — Plaćanje u ratama'
-        : 'Opcija B — Puna uplata pri prijavi'
-
-    const programLabel = isSelf
-      ? 'Self Adventure — Work and Travel USA 2027'
-      : candidate.packageName || candidate.program || 'Full Adventure — Work and Travel USA 2027'
-    const totalLabel = isSelf ? '$1,975 USD' : `${candidate.finalPrice || 2275} USD`
-
-    const body = `UGOVOR O PRUŽANJU USLUGA
-WORK AND TRAVEL USA 2027.
-
-Zaključen u Beogradu između:
-1. Privrednog društva AMERICAN ADVENTURE D.O.O. BEOGRAD, sa sedištem u ul. Gospodar Jevremova 59/4, 11000 Beograd, MB: 20356090, PIB: 105311717, tekući račun: 160-6000000728717-84, koje zastupa direktor Ana Ristovski (u daljem tekstu: Davalac usluga), i
-2. Naručioca usluga: ${candidateName.toUpperCase()}, JMBG: ${jmbg}, Broj pasoša/dokumenta: ${passportNumber}, e-mail: ${candidate.email} (u daljem tekstu: Naručilac usluga).
-
-ČLAN 1. PREDMET UGOVORA I SWT PROGRAM
-Predmet ovog ugovora je regulisanje međusobnih prava i obaveza povodom učešća Naručioca u programu kulturne i radne razmene studenata u SAD („Summer Work & Travel USA 2027“) pod pokroviteljstvom US State Department-a, u okviru izabranog paketa: ${programLabel}.
-
-ČLAN 2. CENA PROGRAMA I USLOVI PLAĆANJA
-Ukupna ugovorena cena programa iznosi ${totalLabel}. Model plaćanja je: ${paymentLabel}.
-Naručilac se obavezuje da uplate vrši prema definisanoj dinamici i instrukcijama Agencije. Uplate se vrše u dinarskoj protivvrednosti po zvaničnom srednjem kursu NBS na račun Agencije.
-
-ČLAN 3. OBAVEZE KANDIDATA
-Naručilac se obavezuje da:
-1. Blagovremeno i savesno dostavi verodostojnu dokumentaciju (uverenje o statusu redovnog studenta, važeći biometrijski pasoš, CV i video biografiju).
-2. Prisustvuje zakazanim intervjuima sa američkim sponzorima i poslodavcima, kao i obaveznoj orijentaciji pre polaska.
-3. Poštuje sve imigracione propise SAD, pravila J-1 BridgeUSA vize, propise SEVIS sistema, te da se javi sponzoru u roku od 72 časa od ulaska u SAD.
-
-ČLAN 4. PRATEĆA DOKUMENTACIJA
-Sastavni deo ovog Ugovora čine: zvanična Izjava o odgovornosti, Saglasnost i važne informacije SWT USA 2027 i Prilog 1 o popustima i akcijama.`
-
-    const contractPdfBytes = await renderContractPdf({
-      acceptance: isSigned
-        ? {
-            acceptedAt: signedAt || new Date(),
-            reference: signedReference,
-            statement: 'Elektronski potvrđeno i prihvaćeno od strane kandidata i ovlašćenog lica agencije.',
-            statementVersion: '2027.1',
-          }
-        : undefined,
-      body,
-      candidateName,
-      contractDate: new Date(),
-      contractNumber,
-      jmbg,
-      passportNumber,
-      paymentLabel,
-      programLabel,
-      totalLabel,
-    })
-
-    const statementPdfBytes = await renderResponsibilityStatementPdf({
-      acceptedAt: signedAt,
-      candidateName,
-      contractNumber,
-      date: new Date(),
-      isAccepted: isSigned,
-      jmbg,
-      passportNumber,
-      reference: signedReference,
-      sourceInfo: candidate.referredBy ? `Preporuka (${candidate.referredBy})` : 'Zvanični portal i preporuka',
-    })
-
-    // Merge both documents: Contract + Authentic Statement of Responsibility
-    const mergedDoc = await PDFDocument.load(contractPdfBytes)
-    const statementDoc = await PDFDocument.load(statementPdfBytes)
-    const copiedPages = await mergedDoc.copyPages(statementDoc, statementDoc.getPageIndices())
-    for (const page of copiedPages) {
-      mergedDoc.addPage(page)
+    // 5. Ugovor: zvaničan tekst agencije + prilog sa podacima + Izjava.
+    //    Prihvaćen ugovor se vraća tačno onakav kakav je sačuvan pri potpisu.
+    if (acceptance?.documentId) {
+      const payload = await getPayload({ config })
+      const stored = await readPortalDocument(payload, acceptance.documentId)
+      if (stored) {
+        return new Response(new Uint8Array(stored.bytes), {
+          headers: {
+            'Cache-Control': 'private, no-store',
+            'Content-Disposition': `attachment; filename="${stored.fileName}"`,
+            'Content-Type': 'application/pdf',
+          },
+        })
+      }
     }
-
-    const mergedBytes = await mergedDoc.save({ useObjectStreams: false })
-
-    return new Response(new Uint8Array(mergedBytes), {
+    if (draft.missing.length > 0) {
+      return new Response(`Za ugovor nedostaje: ${draft.missing.join(', ')}.`, {
+        headers: { 'Cache-Control': 'no-store', 'Content-Type': 'text/plain; charset=utf-8' },
+        status: 409,
+      })
+    }
+    const pdfBytes = await renderPortalContractPdf(draft)
+    return new Response(new Uint8Array(pdfBytes), {
       headers: {
-        'Cache-Control': 'no-store',
-        'Content-Disposition': `attachment; filename="Ugovor_i_Izjava_${safeLast}_${safeFirst}.pdf"`,
+        'Cache-Control': 'private, no-store',
+        'Content-Disposition': `attachment; filename="Ugovor_${contractNumber}_${safeLast}_${safeFirst}.pdf"`,
         'Content-Type': 'application/pdf',
       },
     })
   } catch (error) {
-    console.error('Contract PDF generation failed:', error)
+    console.error('Contract PDF generation failed.', error instanceof Error ? `${error.name}: ${error.message}` : 'UNKNOWN_ERROR')
     return new Response('Greška pri kreiranju PDF ugovora.', { status: 500 })
   }
 }

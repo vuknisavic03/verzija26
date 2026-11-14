@@ -38,6 +38,17 @@ describe('sanitizeCandidateUpdate', () => {
     expect(clean.thirdInstallmentStatus).toBeUndefined()
   })
 
+  it('never lets a candidate mark the contract as signed', () => {
+    const clean = sanitizeCandidateUpdate(
+      { contractAcceptance: { reference: 'x' }, contractSigned: true, contractSignedReference: 'AA-FAKE' },
+      existing,
+      'marko@test.rs',
+    )
+    expect(clean.contractSigned).toBeUndefined()
+    expect(clean.contractAcceptance).toBeUndefined()
+    expect(clean.contractSignedReference).toBeUndefined()
+  })
+
   it('always binds the record to the signed-in email and existing id', () => {
     const clean = sanitizeCandidateUpdate({ email: 'drugi@test.rs', id: 'cand-2' }, existing, 'marko@test.rs')
     expect(clean.email).toBe('marko@test.rs')

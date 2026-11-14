@@ -1,4 +1,5 @@
 // front/src/data/candidateStore/documentsExport.js
+import { downloadPortalContract } from "./contract.js";
 // Zvanični ugovori agencije American Adventure d.o.o., Izjava o odgovornosti, Saglasnost,
 // Promocije (Prilog 1), nalozi za uplatu, sertifikovani sudski prevodi i izvoz za Ambasadu.
 
@@ -612,9 +613,14 @@ export async function downloadContractPdf(id, email, type = "all", extraParams =
     downloadOfficialPromotionsPdf();
     return;
   }
+  if (type === "official") {
+    downloadOfficialContractPdf(isSelf);
+    return;
+  }
 
-  // Preuzimanje zvaničnog PDF ugovora
-  downloadOfficialContractPdf(isSelf);
+  // Ugovor sa podacima kandidata (ili potpisana verzija) — uvek sa servera.
+  const result = await downloadPortalContract({ id });
+  if (!result.ok) window.alert(result.error);
 }
 
 export function downloadResponsibilityStatementPdf(id, email, extraParams = {}) {

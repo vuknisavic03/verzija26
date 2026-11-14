@@ -1,5 +1,4 @@
 import {
-  clearPortalStore,
   createPortalInvitation,
   deletePortalCandidate,
   getPortalState,
@@ -10,11 +9,18 @@ import {
   savePortalPromotions,
   savePortalSiteContent,
   signPortalCandidateContract,
-  verifyPortalInvitation,
   resetPortalInvitation,
   type PortalFaqItem,
   type PortalPromotion,
 } from '@/modules/portal-sync/localStore.ts'
+import {
+  acceptOrGenerateInvitationCode,
+  resolvePortalActor,
+  sanitizeCandidateUpdate,
+} from '@/modules/portal-sync/access.ts'
+import { isSameOriginRequest } from '@/modules/security/sameOrigin.ts'
+
+const MAXIMUM_BODY_SIZE = 25 * 1_024 * 1_024
 
 function json(body: unknown, status = 200) {
   return Response.json(body, {
@@ -23,34 +29,53 @@ function json(body: unknown, status = 200) {
   })
 }
 
-export async function GET(request: Request) {
+/**
+ * Stanje portala. Zahteva prijavu:
+ * - agencija (kolekcija `users`) dobija sve,
+ * - kandidat dobija samo svoj zapis i javni sadržaj (obaveštenja, FAQ, promocije),
+ * - bez prijave: 401.
+ */
+export async function GET() {
+  const actor = await resolvePortalActor()
+  if (actor.kind === 'anonymous') return json({ message: 'Prijavite se ponovo.' }, 401)
+
   try {
-    const url = new URL(request.url)
-    const email = url.searchParams.get('email')?.trim().toLowerCase()
     const state = await getPortalState()
+    if (actor.kind === 'admin') return json(state)
 
-    if (email) {
-      const candidate =
-        state.candidates.find((c) => c.email.toLowerCase() === email) || null
-      return json({
-        announcements: state.announcements,
-        candidate,
-        candidates: state.candidates,
-        faqItems: state.faqItems,
-        invitations: state.invitations,
-        promotions: state.promotions || [],
-        siteContent: state.siteContent,
-      })
-    }
-
-    return json(state)
+    const candidate =
+      state.candidates.find((c) => String(c.email || '').toLowerCase() === actor.email) || null
+    const announcements = (state.announcements || []).filter((a) => {
+      const to = String(a.to || '').toLowerCase()
+      return !to.includes('@') || to.includes(actor.email)
+    })
+    return json({
+      announcements,
+      candidate,
+      candidates: candidate ? [candidate] : [],
+      faqItems: state.faqItems,
+      invitations: [],
+      promotions: state.promotions || [],
+      siteContent: state.siteContent,
+    })
   } catch (error) {
-    console.error('Failed to get portal state:', error)
+    console.error('Failed to get portal state:', error instanceof Error ? error.name : 'UNKNOWN_ERROR')
     return json({ message: 'Greška pri učitavanju stanja portala.' }, 500)
   }
 }
 
+// Potpis ugovora ide isključivo preko /api/public/contracts/accept (sa dokazom), ne ovde.
+const CANDIDATE_ACTIONS = new Set(['saveCandidate', 'saveDs160'])
+
 export async function POST(request: Request) {
+  if (!isSameOriginRequest(request)) return json({ message: 'Zahtev nije dozvoljen.' }, 403)
+
+  const actor = await resolvePortalActor()
+  if (actor.kind === 'anonymous') return json({ message: 'Prijavite se ponovo.' }, 401)
+
+  const declaredSize = Number(request.headers.get('content-length') ?? 0)
+  if (declaredSize > MAXIMUM_BODY_SIZE) return json({ message: 'Zahtev je prevelik.' }, 413)
+
   try {
     const body = (await request.json().catch(() => ({}))) as {
       action?: string
@@ -59,11 +84,41 @@ export async function POST(request: Request) {
     const action = body.action
     const data = body.payload || {}
 
+    if (!action) return json({ message: 'Nepoznata akcija.' }, 400)
+    if (actor.kind === 'candidate' && !CANDIDATE_ACTIONS.has(action)) {
+      return json({ message: 'Pristup odbijen.' }, 403)
+    }
+
+    // Kandidat radi isključivo nad sopstvenim zapisom, vezanim za email prijavljenog naloga.
+    if (actor.kind === 'candidate') {
+      const state = await getPortalState()
+      const existing =
+        state.candidates.find((c) => String(c.email || '').toLowerCase() === actor.email) || null
+      if (!existing) return json({ message: 'Profil nije pronađen.' }, 404)
+
+      if (action === 'saveCandidate') {
+        const clean = sanitizeCandidateUpdate(
+          data,
+          existing as unknown as Record<string, unknown>,
+          actor.email,
+        )
+        const candidate = await savePortalCandidate(clean)
+        return json({ candidate, candidates: [candidate], invitations: [] })
+      }
+      if (action === 'saveDs160') {
+        const answers = (data.ds160 || {}) as Record<string, string>
+        const candidate = await savePortalCandidateDs160(existing.id, answers)
+        return json({ candidate, success: true })
+      }
+    }
+
+    // Odavde nadalje: samo agencija.
+
     if (action === 'createInvitation') {
       const invitation = await createPortalInvitation({
         basePrice: Number(data.basePrice) || undefined,
         candidateName: typeof data.candidateName === 'string' ? data.candidateName : '',
-        code: typeof data.code === 'string' ? data.code : undefined,
+        code: acceptOrGenerateInvitationCode(data.code),
         discount: Number(data.discount) || 0,
         discountNote: typeof data.discountNote === 'string' ? data.discountNote : '',
         email: String(data.email || ''),
@@ -95,21 +150,6 @@ export async function POST(request: Request) {
       const id = (data.id || data.email || '') as string | number
       const candidates = await deletePortalCandidate(id)
       return json({ candidates })
-    }
-
-    if (action === 'verifyInvitation') {
-      const res = await verifyPortalInvitation(
-        String(data.email || ''),
-        String(data.code || ''),
-      )
-      return json(
-        {
-          invitation: res.invitation,
-          message: res.message,
-          valid: res.valid,
-        },
-        res.status,
-      )
     }
 
     if (action === 'saveAnnouncement') {
@@ -160,14 +200,9 @@ export async function POST(request: Request) {
       return json({ candidate, candidates: state.candidates, success: true })
     }
 
-    if (action === 'clearMockData') {
-      const clean = await clearPortalStore()
-      return json(clean)
-    }
-
     return json({ message: 'Nepoznata akcija.' }, 400)
   } catch (error) {
-    console.error('Portal state action failed:', error)
+    console.error('Portal state action failed:', error instanceof Error ? error.name : 'UNKNOWN_ERROR')
     return json({ message: 'Greška pri izvršavanju akcije na serveru.' }, 500)
   }
 }
