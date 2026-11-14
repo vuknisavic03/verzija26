@@ -58,7 +58,7 @@ export async function readPortalDb(payload: Payload): Promise<PortalDbSnapshot> 
   const candidates: Json[] = []
   for (const row of rows.docs) {
     if (row.kind === 'settings') settings = row.data as unknown as PortalSettingsData
-    else if (row.data && typeof row.data === 'object') candidates.push(row.data as Json)
+    else if (row.data && typeof row.data === 'object') candidates.push(decryptFields(row.data as Json))
   }
   return { candidates, settings }
 }
@@ -187,6 +187,60 @@ async function extractDocuments(payload: Payload, candidate: Json, recordKey: st
   return result
 }
 
+/* ── Šifrovanje osetljivih polja ───────────────────────────────────────────
+ * JMBG, brojevi dokumenata, podaci žiranta i DS-160 odgovori u bazi stoje samo šifrovani
+ * (AES-256-GCM, SENSITIVE_DATA_*). Ostatak koda ih vidi dešifrovane, kao i ranije.
+ */
+
+export const SENSITIVE_RECORD_FIELDS = ['jmbg', 'idCardNumber', 'passportNumber', 'guarantor', 'ds160'] as const
+
+type EncryptedField = { __enc: { authTag: string; ciphertext: string; iv: string; keyId: string } }
+
+function isEncryptedField(value: unknown): value is EncryptedField {
+  return Boolean(value && typeof value === 'object' && '__enc' in (value as Json))
+}
+
+function fieldContext(field: string) {
+  return `portal-record-field:${field}`
+}
+
+function isEmpty(value: unknown) {
+  return value === undefined || value === null || value === ''
+}
+
+export function encryptFields(data: Json): Json {
+  let keyring: ReturnType<typeof readSensitiveDataKeyring>
+  try {
+    keyring = readSensitiveDataKeyring()
+  } catch (error) {
+    console.error(
+      'Sensitive portal fields stored without encryption: SENSITIVE_DATA_* is not configured.',
+      error instanceof Error ? error.name : 'UNKNOWN_ERROR',
+    )
+    return data
+  }
+  const out: Json = { ...data }
+  for (const field of SENSITIVE_RECORD_FIELDS) {
+    const value = out[field]
+    if (isEmpty(value) || isEncryptedField(value)) continue
+    const plaintext = Buffer.from(JSON.stringify(value), 'utf8')
+    out[field] = { __enc: encryptSensitiveBytes(plaintext, keyring, fieldContext(field)) }
+  }
+  return out
+}
+
+export function decryptFields(data: Json): Json {
+  if (!SENSITIVE_RECORD_FIELDS.some((field) => isEncryptedField(data[field]))) return data
+  const keyring = readSensitiveDataKeyring()
+  const out: Json = { ...data }
+  for (const field of SENSITIVE_RECORD_FIELDS) {
+    const value = out[field]
+    if (!isEncryptedField(value)) continue
+    out[field] = JSON.parse(decryptSensitiveBytes(value.__enc, keyring, fieldContext(field)).toString('utf8'))
+  }
+  return out
+}
+
 /* ── Upis ───────────────────────────────────────────────────────────────── */
 
 async function upsertRow(
@@ -197,14 +251,16 @@ async function upsertRow(
   email: string | undefined,
   data: Json,
 ) {
+  // Poređenje ide nad dešifrovanim sadržajem (šifrat je svaki put drugačiji zbog IV-a).
   const json = JSON.stringify(data)
   const current = existing.get(key)
   if (current?.json === json) return
+  const stored = kind === 'candidate' ? encryptFields(data) : data
   if (current) {
-    await payload.update({ collection: 'portal-records', data: { data, email }, id: current.id, overrideAccess: true })
+    await payload.update({ collection: 'portal-records', data: { data: stored, email }, id: current.id, overrideAccess: true })
     existing.set(key, { id: current.id, json })
   } else {
-    const created = await payload.create({ collection: 'portal-records', data: { data, email, key, kind }, overrideAccess: true })
+    const created = await payload.create({ collection: 'portal-records', data: { data: stored, email, key, kind }, overrideAccess: true })
     existing.set(key, { id: created.id, json })
   }
 }
@@ -224,9 +280,19 @@ export async function writePortalDb(
   const existing = new Map<string, { id: number | string; json: string }>()
   let previousSettings: PortalSettingsData | null = null
   for (const row of rows.docs) {
-    existing.set(row.key, { id: row.id, json: JSON.stringify(row.data) })
+    const plain = row.kind === 'candidate' ? decryptFields(row.data as Json) : row.data
+    // Red koji još nije šifrovan (stariji upis) dobija prazan otisak, pa se ponovo upiše šifrovan.
+    const needsEncryption =
+      row.kind === 'candidate' &&
+      SENSITIVE_RECORD_FIELDS.some((f) => !isEmpty((row.data as Json)[f]) && !isEncryptedField((row.data as Json)[f]))
+    existing.set(row.key, { id: row.id, json: needsEncryption ? '' : JSON.stringify(plain) })
     if (row.kind === 'settings') previousSettings = row.data as unknown as PortalSettingsData
   }
+
+  // Kandidatu se ID menja (npr. `preapp-…` → ID iz baze). Stari red sa istim emailom se uklanja,
+  // da ista osoba ne postoji dvaput. Dokumenta ostaju (vezana su za email i link u dosijeu).
+  const emailOfKey = new Map<string, string>()
+  for (const row of rows.docs) if (row.kind === 'candidate' && row.email) emailOfKey.set(row.key, row.email)
 
   const savedCandidates: Json[] = []
   for (const candidate of state.candidates) {
@@ -239,6 +305,16 @@ export async function writePortalDb(
     const email = String(clean.email || '').trim().toLowerCase() || undefined
     await upsertRow(payload, existing, key, 'candidate', email, clean)
     savedCandidates.push(clean)
+    if (email) {
+      for (const [otherKey, otherEmail] of emailOfKey) {
+        if (otherKey === key || otherEmail !== email) continue
+        const stale = existing.get(otherKey)
+        if (stale) await payload.delete({ collection: 'portal-records', id: stale.id, overrideAccess: true })
+        existing.delete(otherKey)
+        emailOfKey.delete(otherKey)
+      }
+      emailOfKey.set(key, email)
+    }
   }
 
   const settings: PortalSettingsData = {
@@ -270,7 +346,9 @@ export async function deletePortalRecord(payload: Payload, idOrEmail: string | n
     await payload.delete({
       collection: 'portal-documents',
       overrideAccess: true,
-      where: { recordKey: { equals: row.key } },
+      where: row.email
+        ? { or: [{ recordKey: { equals: row.key } }, { email: { equals: row.email } }] }
+        : { recordKey: { equals: row.key } },
     })
     await payload.delete({ collection: 'portal-records', id: row.id, overrideAccess: true })
   }

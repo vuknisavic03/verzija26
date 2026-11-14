@@ -54,7 +54,6 @@ export async function submitPreApplicationWithBackend({
 
   const noteParts = [
     `Program: ${program || "Work and Travel"}`,
-    jmbg ? `JMBG: ${jmbg}` : "",
     previousExperience === "yes" ? "Ranije bio/la na programu" : "",
     message ? `Poruka: ${message}` : "",
   ].filter(Boolean);
@@ -97,7 +96,6 @@ export async function submitPreApplicationWithBackend({
     lastName: lastName || "",
     name: `${firstName || "Kandidat"} ${lastName || ""}`.trim(),
     phone: (phone || "").trim(),
-    jmbg: cleanJmbg,
     faculty: (faculty || "").trim(),
     studyCity: studyCity || "Beograd",
     studyYear: currentStudyYear,

@@ -325,6 +325,34 @@ export async function getPayloadIfAvailable(): Promise<Payload | null> {
   }
 }
 
+let applicationColumnsScrubbed = false
+
+/**
+ * Jednokratno (po procesu) briše JMBG i brojeve dokumenata iz tabele `candidate-applications`,
+ * gde su ranije stajali nešifrovani. Poziva se tek pošto je dosije (šifrovan) već upisan.
+ */
+async function scrubApplicationSensitiveColumns(payload: Payload) {
+  if (applicationColumnsScrubbed) return
+  try {
+    await payload.update({
+      collection: 'candidate-applications',
+      data: { guarantor: { idCardNumber: '', jmbg: '' }, idCardNumber: '', jmbg: '' },
+      overrideAccess: true,
+      where: {
+        or: [
+          { jmbg: { not_equals: '' } },
+          { idCardNumber: { not_equals: '' } },
+          { 'guarantor.jmbg': { not_equals: '' } },
+          { 'guarantor.idCardNumber': { not_equals: '' } },
+        ],
+      },
+    })
+    applicationColumnsScrubbed = true
+  } catch (error) {
+    console.error('Scrubbing sensitive application columns failed.', error instanceof Error ? error.name : 'UNKNOWN_ERROR')
+  }
+}
+
 export async function getPortalState(): Promise<PortalStoreData> {
   const fileData = await readStore()
   const payload = await getPayloadIfAvailable()
@@ -422,6 +450,10 @@ export async function getPortalState(): Promise<PortalStoreData> {
       return {
         ...existing,
         ...dbCand,
+        // Lični podaci žive samo u (šifrovanom) dosijeu; stare vrednosti iz tabele su rezerva.
+        jmbg: existing.jmbg || dbCand.jmbg,
+        idCardNumber: existing.idCardNumber || dbCand.idCardNumber,
+        guarantor: existing.guarantor ?? dbCand.guarantor,
         isRegistered,
         registeredAt: existing.registeredAt || (isRegistered ? dbCand.createdAt : undefined),
         selectionDecision: existing.selectionDecision || (isRegistered ? 'QUALIFIED' : 'PENDING'),
@@ -494,8 +526,10 @@ export async function getPortalState(): Promise<PortalStoreData> {
       candidates = fileData.candidates
     }
 
-    const merged = { candidates, invitations }
+    // Obaveštenja, FAQ, promocije i sadržaj sajta ostaju — ranije su se ovde tiho gubili.
+    const merged: PortalStoreData = { ...fileData, candidates, invitations }
     await writeStore(merged)
+    await scrubApplicationSensitiveColumns(payload)
     return merged
   } catch {
     return fileData
@@ -907,9 +941,17 @@ export async function savePortalCandidate(candidateInput: Partial<PortalCandidat
         facultyCertFileName: mergedCandidate.facultyCertFileName,
         finalPrice: mergedCandidate.finalPrice,
         firstName: mergedCandidate.firstName,
-        guarantor: mergedCandidate.guarantor || undefined,
-        idCardNumber: mergedCandidate.idCardNumber,
-        jmbg: mergedCandidate.jmbg,
+        // JMBG i brojevi dokumenata se ne upisuju u ovu tabelu (čuvaju se šifrovano u dosijeu).
+        guarantor: mergedCandidate.guarantor
+          ? {
+              idCardNumber: '',
+              jmbg: '',
+              name: mergedCandidate.guarantor.name,
+              promissoryNotesCount: mergedCandidate.guarantor.promissoryNotesCount,
+            }
+          : undefined,
+        idCardNumber: '',
+        jmbg: '',
         lastName: mergedCandidate.lastName,
         notes: mergedCandidate.notes,
         packageId: pkgId,
