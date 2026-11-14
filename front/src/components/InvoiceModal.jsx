@@ -1,3 +1,4 @@
+import Sheet from "./dashboard/Sheet";
 import React, { useState, useEffect, useMemo } from "react";
 import {
   AGENCY_INFO,
@@ -12,7 +13,12 @@ import {
 } from "../data/invoicesStore";
 import { openPrintablePaymentSlipWindow } from "../data/candidateStore/documentsExport";
 
-export default function InvoiceModal({
+export default function InvoiceModal(props) {
+  if (!props.isOpen) return null;
+  return <InvoiceView {...props} />;
+}
+
+function InvoiceView({
   invoice = null,
   selectedInvoice = null,
   candidate = null,
@@ -23,7 +29,6 @@ export default function InvoiceModal({
   onSelectInvoice = () => {},
   onPayInvoice = () => {},
 }) {
-  if (!isOpen) return null;
 
   const [currentInvoice, setCurrentInvoice] = useState(invoice || selectedInvoice || null);
 
@@ -470,205 +475,79 @@ export default function InvoiceModal({
   }
 
   // KANDIDATSKI PREGLED: LISTA SVIH IZDATIH FAKTURA I UPLATNICA
+  const linkCls = "text-[13px] font-medium text-ink underline decoration-line-strong underline-offset-4 hover:decoration-ink";
   return (
-    <div className="fixed inset-0 z-[130] flex items-center justify-center bg-black/60 p-2 sm:p-6 backdrop-blur-xs overflow-y-auto">
-      <div className="relative my-4 flex max-h-[92vh] w-full max-w-4xl flex-col rounded-2xl bg-white shadow-2xl border border-line overflow-hidden">
-        {/* Kontrolno zaglavlje */}
-        <div className="flex flex-wrap items-center justify-between border-b border-line bg-ink px-5 py-3.5 text-white">
-          <div className="flex items-center gap-3">
-            <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-brand text-xs font-bold text-ink">
-              KIR
-            </span>
-            <div>
-              <h3 className="font-bold text-sm sm:text-base text-white">
-                Moji računi / Knjiga izdatih računa (KIR)
-              </h3>
-              <p className="text-xs text-neutral-300">
-                {candidate?.name || `${candidate?.firstName || ""} ${candidate?.lastName || ""}`.trim() || "Student Kandidat"} • {candidate?.packageName || "Work & Travel USA 2026"}
-              </p>
+    <Sheet
+      onClose={onClose}
+      size="lg"
+      title="Računi"
+      subtitle={`${candidate?.packageName || "Work & Travel USA 2026"} · važe u elektronskom obliku`}
+    >
+      <div className="space-y-6">
+        <dl className="grid grid-cols-3 divide-x divide-line rounded-xl border border-line">
+          {[
+            ["Cena", packagePriceEur, Math.round(packagePriceEur * nbsRate), "text-ink"],
+            ["Plaćeno", totalPaidEur, totalPaidRsd, "text-emerald-700"],
+            ["Preostalo", remainingEur, remainingRsd, remainingEur > 0 ? "text-ink" : "text-ink-3"],
+          ].map(([k, eur, rsd, tone]) => (
+            <div key={k} className="px-3 py-3 sm:px-4">
+              <dt className="text-xs text-ink-3">{k}</dt>
+              <dd className={`mt-0.5 text-[15px] font-semibold tabular-nums sm:text-lg ${tone}`}>{formatEur(eur)}</dd>
+              <dd className="text-[11px] tabular-nums text-ink-3 sm:text-xs">≈ {formatRsd(rsd)}</dd>
             </div>
-          </div>
+          ))}
+        </dl>
 
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-lg bg-white/10 p-1.5 text-neutral-300 hover:bg-white/20 hover:text-white transition-colors"
-          >
-            <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
-        </div>
-
-        {/* Sadržaj liste sa finansijskim pregledom */}
-        <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-5 bg-surface">
-          {/* 3 finansijske kartice za kandidata */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            <div className="rounded-xl border border-line bg-white p-3.5">
-              <span className="text-xs font-bold text-ink-3">
-                Cena programa
-              </span>
-              <div className="mt-1 tabular-nums text-lg font-bold text-ink">
-                {formatEur(packagePriceEur)}
-              </div>
-              <div className="text-xs text-ink-3 mt-0.5">
-                ≈ {formatRsd(Math.round(packagePriceEur * nbsRate))}
-              </div>
-            </div>
-
-            <div className="rounded-xl bg-emerald-50 p-3.5">
-              <span className="text-xs font-bold text-emerald-800">
-                Ukupno uplaćeno
-              </span>
-              <div className="mt-1 tabular-nums text-lg font-bold text-emerald-900">
-                {formatEur(totalPaidEur)}
-              </div>
-              <div className="text-xs text-emerald-700 mt-0.5">
-                = {formatRsd(totalPaidRsd)}
-              </div>
-            </div>
-
-            <div className="rounded-xl bg-amber-50 p-3.5">
-              <span className="text-xs font-bold text-amber-800">
-                Preostali dug
-              </span>
-              <div className="mt-1 tabular-nums text-lg font-bold text-amber-950">
-                {formatEur(remainingEur)}
-              </div>
-              <div className="text-xs text-amber-800 mt-0.5">
-                ≈ {formatRsd(remainingRsd)}
-              </div>
-            </div>
-          </div>
-
-          {/* Lista računa */}
-          <div className="space-y-3">
-            <div className="flex items-center justify-between mb-4">
-              <h4 className="text-base font-semibold leading-snug text-ink">
-                Zvanične fakture i nalozi za plaćanje
-              </h4>
-              <span className="text-xs text-ink-3 font-medium">
-                Ukupno računa: <strong>{candidateInvoices.length}</strong>
-              </span>
-            </div>
-
-            {candidateInvoices.length === 0 ? (
-              <div className="rounded-xl border border-line bg-white p-8 text-center text-ink-2">
-                <p className="font-semibold text-sm text-ink">Trenutno nema izdatih računa u bazi.</p>
-                <p className="text-xs text-ink-3 mt-1">
-                  Vaše fakture se automatski kreiraju prilikom svake prijave ili knjiženja uplate.
-                </p>
-              </div>
-            ) : (
-              candidateInvoices.map((inv) => {
-                const statusInfo = PAYMENT_STATUSES[inv.status] || {
-                  label: inv.status,
-                  badgeCls: "bg-surface-2 text-ink border-line-strong",
-                };
-                const isPaid = inv.status === "PAID";
-
-                return (
-                  <div
-                    key={inv.id}
-                    className="rounded-xl border border-line bg-white p-4 hover:border-line-strong transition-all space-y-3"
-                  >
-                    <div className="flex flex-wrap items-start justify-between gap-3">
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <span className="tabular-nums text-sm font-bold text-ink">
-                            {inv.invoiceNumber}
-                          </span>
-                          <span
-                            className={`rounded-full px-3 py-1 text-xs font-medium border ${statusInfo.badgeCls}`}
-                          >
-                            {statusInfo.label}
-                          </span>
-                        </div>
-                        <h5 className="font-semibold text-xs sm:text-sm text-ink mt-1">
-                          {inv.purpose}
-                        </h5>
-                      </div>
-
-                      <div className="text-right">
-                        <div className="tabular-nums text-base font-bold text-ink">
-                          {formatEur(inv.originalAmount)}
-                        </div>
-                        <div className="tabular-nums text-xs font-semibold text-emerald-800 mt-0.5">
-                          = {formatRsd(inv.totalRsd)}
-                        </div>
-                      </div>
+        {candidateInvoices.length === 0 ? (
+          <p className="rounded-xl border border-dashed border-line-strong px-4 py-10 text-center text-sm text-ink-3">
+            Još nema računa. Nastaju sami, kad prijaviš ili mi proknjižimo uplatu.
+          </p>
+        ) : (
+          <ul className="divide-y divide-line rounded-xl border border-line">
+            {candidateInvoices.map((inv) => {
+              const statusInfo = PAYMENT_STATUSES[inv.status] || { label: inv.status };
+              const isPaid = inv.status === "PAID";
+              return (
+                <li key={inv.id} className="px-4 py-4">
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="min-w-0">
+                      <p className="text-[15px] font-medium text-ink">{inv.purpose}</p>
+                      <p className="mt-0.5 text-[13px] tabular-nums text-ink-3">
+                        {inv.invoiceNumber} · {isPaid && inv.paidDate ? `plaćeno ${inv.paidDate}` : `rok ${inv.dueDate}`}
+                      </p>
                     </div>
-
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1 border-t border-line text-xs text-ink-2">
-                      <div>
-                        Datum izdavanja: <strong className="text-ink">{inv.issueDate}</strong>
-                      </div>
-                      <div>
-                        Rok za uplatu: <strong className="text-ink">{inv.dueDate}</strong>
-                      </div>
-                      <div>
-                        Srednji kurs NBS: <strong className="text-ink tabular-nums">{Number(inv.exchangeRate).toFixed(4)}</strong>
-                      </div>
-                      <div>
-                        Status kursa: <strong className="text-ink">{inv.exchangeRateLocked ? "Zaključan" : "Dnevni"}</strong>
-                      </div>
-                    </div>
-
-                    <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-line">
-                      <div className="text-xs text-ink-3">
-                        {isPaid && inv.paidDate && (
-                          <span className="text-emerald-700 font-semibold">
-                            Uplaćeno dana: {inv.paidDate}
-                          </span>
-                        )}
-                        {!isPaid && (
-                          <span className="text-amber-800 font-medium">
-                            Poziv na broj: Model 97 • {inv.referenceNumber}
-                          </span>
-                        )}
-                      </div>
-
-                      <div className="flex items-center gap-2">
-                        <button
-                          type="button"
-                          onClick={() => handleOpenSlip(inv)}
-                          className="rounded-full border border-line-strong bg-white px-3 py-1.5 text-xs font-semibold text-ink-2 hover:bg-surface transition-colors"
-                        >
-                          Primer uplatnice (IPS QR)
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setCurrentInvoice(inv);
-                            onSelectInvoice(inv);
-                          }}
-                          className="rounded-full bg-ink px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-ink transition-colors"
-                        >
-                          Pregledaj zvanični račun
-                        </button>
-                      </div>
+                    <div className="shrink-0 text-right">
+                      <p className="text-[15px] font-semibold tabular-nums text-ink">{formatEur(inv.originalAmount)}</p>
+                      <p className={`text-[13px] ${isPaid ? "text-emerald-700" : "text-amber-700"}`}>{statusInfo.label}</p>
                     </div>
                   </div>
-                );
-              })
-            )}
-          </div>
-        </div>
-
-        {/* Podnožje modala */}
-        <div className="flex items-center justify-between border-t border-line bg-white px-5 py-3 text-xs text-ink-2">
-          <p>
-            Svi računi su punovažni u elektronskom obliku u skladu sa Zakonom o računovodstvu RS.
-          </p>
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-full border border-line-strong bg-white px-4 py-1.5 text-xs font-semibold text-ink hover:bg-surface-2 transition-colors"
-          >
-            Zatvori
-          </button>
-        </div>
+                  <p className="mt-2 text-xs tabular-nums text-ink-3">
+                    = {formatRsd(inv.totalRsd)} · kurs {Number(inv.exchangeRate).toFixed(4)} ({inv.exchangeRateLocked ? "zaključan" : "dnevni"})
+                    {!isPaid && ` · model 97, ${inv.referenceNumber}`}
+                  </p>
+                  <div className="mt-3 flex flex-wrap gap-x-5 gap-y-2">
+                    <button
+                      type="button"
+                      className={linkCls}
+                      onClick={() => {
+                        setCurrentInvoice(inv);
+                        onSelectInvoice(inv);
+                      }}
+                    >
+                      Pogledaj račun
+                    </button>
+                    {!isPaid && (
+                      <button type="button" className={linkCls} onClick={() => handleOpenSlip(inv)}>
+                        Uplatnica sa IPS QR
+                      </button>
+                    )}
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        )}
       </div>
-    </div>
+    </Sheet>
   );
 }

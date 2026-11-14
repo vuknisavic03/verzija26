@@ -1,9 +1,14 @@
-import React, { useState } from "react";
+import { useState } from "react";
 import { calculateProfileScore } from "../data/candidateStore";
+import { Button, cx } from "./ui";
+import Sheet, { SheetSteps, SheetSection, SheetFooter, FormField, Chip, Hint, fieldInputCls as inp } from "./dashboard/Sheet";
 
 export default function ProfileBuilderModal({ candidate, isOpen = true, onClose, onSave }) {
   if (!isOpen || !candidate) return null;
+  return <ProfileBuilder candidate={candidate} onClose={onClose} onSave={onSave} />;
+}
 
+function ProfileBuilder({ candidate, onClose, onSave }) {
   const [activeTab, setActiveTab] = useState("personal");
 
   const [f, setF] = useState({
@@ -128,6 +133,12 @@ export default function ProfileBuilderModal({ candidate, isOpen = true, onClose,
 
   const handleSubmit = (e) => {
     e.preventDefault();
+    // Enter u polju ili "Dalje" vodi na sledeći korak; čuva se tek na poslednjem.
+    const idx = TABS.findIndex((t) => t.id === activeTab);
+    if (idx < TABS.length - 1) {
+      setActiveTab(TABS[idx + 1].id);
+      return;
+    }
     const payload = {
       firstName: f.firstName.trim(),
       lastName: f.lastName.trim(),
@@ -191,14 +202,12 @@ export default function ProfileBuilderModal({ candidate, isOpen = true, onClose,
     }
   };
 
-  const embedVideoUrl = getEmbedUrl(f.youtubeUrl);
-
   const TABS = [
-    { id: "personal", label: "1. Lični & Fakultet" },
-    { id: "availability", label: "2. Datumi u SAD" },
-    { id: "experience", label: "3. CV & Radno iskustvo" },
-    { id: "preferences", label: "4. Posao & Lokacija" },
-    { id: "video", label: "5. Video prezentacija" },
+    { id: "personal", label: "O tebi" },
+    { id: "availability", label: "Datumi" },
+    { id: "experience", label: "Iskustvo" },
+    { id: "preferences", label: "Posao" },
+    { id: "video", label: "Video" },
   ];
 
   const POPULAR_SKILLS = [
@@ -228,667 +237,320 @@ export default function ProfileBuilderModal({ candidate, isOpen = true, onClose,
     "Wisconsin",
   ];
 
+  const embedVideoUrl = getEmbedUrl(f.youtubeUrl);
+  const stepIndex = TABS.findIndex((t) => t.id === activeTab);
+  const isLast = stepIndex === TABS.length - 1;
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-2 sm:p-4 backdrop-blur-xs overflow-y-auto">
-      <div className="relative my-4 flex max-h-[92vh] w-full max-w-5xl xl:max-w-6xl 2xl:max-w-[1320px] flex-col rounded-2xl bg-white shadow-2xl border border-line overflow-hidden">
-        {/* Header modala */}
-        <div className="border-b border-line bg-ink px-6 py-4 text-white">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="flex items-center gap-3">
-              <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-brand text-sm font-bold text-ink">
-                2.1
-              </span>
-              <div>
-                <div className="flex items-center gap-2">
-                  <h2 className="text-base font-bold tracking-tight sm:text-lg">
-                    Studentski profil & CV Builder za poslodavce u SAD
-                  </h2>
-                  <span className="rounded-full bg-white/10 text-white/85 px-3 py-1 text-xs font-medium">
-                    Faza 2
-                  </span>
-                </div>
-                <p className="text-xs text-neutral-300 mt-0.5">
-                  Popunite profil, radno iskustvo i video pre izbora posla i zakazivanja intervjua.
-                </p>
-              </div>
+    <Sheet
+      onClose={onClose}
+      size="lg"
+      as="form"
+      onSubmit={handleSubmit}
+      title="Profil za poslodavce"
+      subtitle="Po ovome te poslodavci biraju za intervju."
+      aside={
+        <span className="text-[13px] text-ink-3">
+          Popunjeno <span className="font-semibold tabular-nums text-ink">{profileScore}%</span>
+        </span>
+      }
+      nav={<SheetSteps steps={TABS} active={activeTab} onChange={setActiveTab} />}
+      footer={
+        <SheetFooter
+          left={
+            <Button variant="ghost" size="sm" onClick={() => window.print()} className="max-sm:hidden">
+              Štampaj CV
+            </Button>
+          }
+        >
+          {stepIndex > 0 && (
+            <Button variant="outline" onClick={() => setActiveTab(TABS[stepIndex - 1].id)}>
+              Nazad
+            </Button>
+          )}
+          <Button type="submit" variant={isLast ? "primary" : "dark"}>
+            {isLast ? "Sačuvaj profil" : "Dalje"}
+          </Button>
+        </SheetFooter>
+      }
+    >
+      {/* 1. Lični podaci i fakultet */}
+      {activeTab === "personal" && (
+        <div className="space-y-8">
+          <SheetSection title="O tebi">
+            <div className="grid gap-4 sm:grid-cols-2">
+              <FormField label="Ime">
+                <input type="text" required autoComplete="given-name" value={f.firstName} onChange={upd("firstName")} className={inp} />
+              </FormField>
+              <FormField label="Prezime">
+                <input type="text" required autoComplete="family-name" value={f.lastName} onChange={upd("lastName")} className={inp} />
+              </FormField>
+              <FormField label="E-mail">
+                <input type="email" required autoComplete="email" value={f.email} onChange={upd("email")} className={inp} />
+              </FormField>
+              <FormField label="Telefon (WhatsApp)">
+                <input type="tel" required autoComplete="tel" value={f.phone} onChange={upd("phone")} className={inp} />
+              </FormField>
             </div>
+          </SheetSection>
 
-            <div className="flex items-center gap-3">
-              {/* Status profila */}
-              <div className="hidden sm:flex flex-col items-end">
-                <span className="text-xs font-semibold text-neutral-400">
-                  Status profila
-                </span>
-                <span className="text-xs font-bold text-brand">
-                  {profileScore >= 80 ? "Kompletiran" : "U pripremi"}
-                </span>
-              </div>
-              <button
-                type="button"
-                onClick={onClose}
-                className="rounded-lg bg-white/10 p-1.5 text-neutral-300 hover:bg-white/20 hover:text-white transition-colors"
-              >
-                ✕
-              </button>
+          <SheetSection title="Studije">
+            <div className="grid gap-4 sm:grid-cols-3">
+              <FormField label="Fakultet" className="sm:col-span-2">
+                <input type="text" required value={f.faculty} onChange={upd("faculty")} placeholder="Fakultet organizacionih nauka" className={inp} />
+              </FormField>
+              <FormField label="Grad">
+                <input type="text" required value={f.studyCity} onChange={upd("studyCity")} className={inp} />
+              </FormField>
+              <FormField label="Smer">
+                <input type="text" value={f.studyMajor} onChange={upd("studyMajor")} placeholder="Menadžment" className={inp} />
+              </FormField>
+              <FormField label="Godina">
+                <select value={f.studyYear} onChange={upd("studyYear")} className={inp}>
+                  <option value="YEAR_1">1. godina</option>
+                  <option value="YEAR_2">2. godina</option>
+                  <option value="YEAR_3">3. godina</option>
+                  <option value="YEAR_4">4. godina</option>
+                  <option value="MASTER">Master</option>
+                </select>
+              </FormField>
+              <FormField label="Engleski">
+                <select value={f.englishLevel} onChange={upd("englishLevel")} className={inp}>
+                  <option value="B1">B1 — srednji</option>
+                  <option value="B2">B2 — viši srednji</option>
+                  <option value="C1">C1 — napredni</option>
+                  <option value="C2">C2 — tečan</option>
+                </select>
+              </FormField>
             </div>
+          </SheetSection>
+        </div>
+      )}
+
+      {/* 2. Datumi */}
+      {activeTab === "availability" && (
+        <div className="space-y-6">
+          <Hint>Datumi moraju da se uklope u letnji raspust — najranije 20. maj, najkasnije 1. oktobar.</Hint>
+          <div className="grid gap-4 sm:grid-cols-3">
+            <FormField label="Počinjem da radim" hint="Prvi dan kod poslodavca">
+              <input type="date" required value={f.startDate} onChange={upd("startDate")} className={inp} />
+            </FormField>
+            <FormField label="Poslednji dan rada">
+              <input type="date" required value={f.endDate} onChange={upd("endDate")} className={inp} />
+            </FormField>
+            <FormField label="Vraćam se kući" hint="Do 30 dana posle rada za putovanje">
+              <input type="date" required value={f.travelUntil} onChange={upd("travelUntil")} className={inp} />
+            </FormField>
           </div>
-
-
+          <FormField label="Napomena (nije obavezno)">
+            <textarea
+              rows={3}
+              value={f.availabilityNotes}
+              onChange={upd("availabilityNotes")}
+              placeholder="npr. Junske ispite polažem u predroku, do 20. maja."
+              className={inp}
+            />
+          </FormField>
         </div>
+      )}
 
-        {/* Tab navigacija */}
-        <div className="flex border-b border-line bg-surface overflow-x-auto px-4 gap-1">
-          {TABS.map((t) => (
-            <button
-              key={t.id}
-              type="button"
-              onClick={() => setActiveTab(t.id)}
-              className={`flex items-center gap-1.5 py-3 px-3.5 text-xs font-semibold border-b-2 whitespace-nowrap transition-colors ${
-                activeTab === t.id
-                  ? "border-ink text-ink bg-white"
-                  : "border-transparent text-ink-3 hover:text-ink hover:bg-surface"
-              }`}
-            >
-              <span>{t.label}</span>
-            </button>
-          ))}
-        </div>
-
-        {/* Sadržaj tabova */}
-        <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-6 space-y-6 text-xs sm:text-sm text-ink">
-          {/* TAB 1: LIČNI I AKADEMSKI PODACI */}
-          {activeTab === "personal" && (
-            <div className="space-y-4">
-              <div className="rounded-2xl border border-line bg-white p-5 text-xs text-ink sm:p-6">
-                <strong>Napomena:</strong> Ovi podaci se direktno prikazuju u DS-7002 obrascu i američkom poslodavcu tokom intervjua.
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-semibold text-ink-2 mb-1">Ime:</label>
-                  <input
-                    type="text"
-                    required
-                    value={f.firstName}
-                    onChange={upd("firstName")}
-                    className="w-full rounded-xl border border-line-strong bg-white px-3.5 py-2 text-sm focus:border-ink focus:outline-hidden"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-ink-2 mb-1">Prezime:</label>
-                  <input
-                    type="text"
-                    required
-                    value={f.lastName}
-                    onChange={upd("lastName")}
-                    className="w-full rounded-xl border border-line-strong bg-white px-3.5 py-2 text-sm focus:border-ink focus:outline-hidden"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-semibold text-ink-2 mb-1">Email adresa:</label>
-                  <input
-                    type="email"
-                    required
-                    value={f.email}
-                    onChange={upd("email")}
-                    className="w-full rounded-xl border border-line-strong bg-white px-3.5 py-2 text-sm focus:border-ink focus:outline-hidden"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-ink-2 mb-1">Broj telefona (WhatsApp):</label>
-                  <input
-                    type="tel"
-                    required
-                    value={f.phone}
-                    onChange={upd("phone")}
-                    className="w-full rounded-xl border border-line-strong bg-white px-3.5 py-2 text-sm focus:border-ink focus:outline-hidden"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 border-t border-line pt-4">
-                <div className="sm:col-span-2">
-                  <label className="block text-xs font-semibold text-ink-2 mb-1">Fakultet / Univerzitet:</label>
-                  <input
-                    type="text"
-                    required
-                    value={f.faculty}
-                    onChange={upd("faculty")}
-                    placeholder="npr. Fakultet organizacionih nauka, Beograd"
-                    className="w-full rounded-xl border border-line-strong bg-white px-3.5 py-2 text-sm focus:border-ink focus:outline-hidden"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-ink-2 mb-1">Grad studiranja:</label>
-                  <input
-                    type="text"
-                    required
-                    value={f.studyCity}
-                    onChange={upd("studyCity")}
-                    className="w-full rounded-xl border border-line-strong bg-white px-3.5 py-2 text-sm focus:border-ink focus:outline-hidden"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                <div>
-                  <label className="block text-xs font-semibold text-ink-2 mb-1">Smer / Departman:</label>
-                  <input
-                    type="text"
-                    value={f.studyMajor}
-                    onChange={upd("studyMajor")}
-                    placeholder="npr. Menadžment i IT"
-                    className="w-full rounded-xl border border-line-strong bg-white px-3.5 py-2 text-sm focus:border-ink focus:outline-hidden"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-ink-2 mb-1">Godina studija:</label>
-                  <select
-                    value={f.studyYear}
-                    onChange={upd("studyYear")}
-                    className="w-full rounded-xl border border-line-strong bg-white px-3.5 py-2 text-sm focus:border-ink focus:outline-hidden"
-                  >
-                    <option value="YEAR_1">1. godina</option>
-                    <option value="YEAR_2">2. godina</option>
-                    <option value="YEAR_3">3. godina</option>
-                    <option value="YEAR_4">4. godina</option>
-                    <option value="MASTER">Master studije</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-ink-2 mb-1">Nivo engleskog jezika:</label>
-                  <select
-                    value={f.englishLevel}
-                    onChange={upd("englishLevel")}
-                    className="w-full rounded-xl border border-line-strong bg-white px-3.5 py-2 text-sm font-semibold text-amber-900 bg-amber-50 focus:border-ink focus:outline-hidden"
-                  >
-                    <option value="B1">B1 (Intermediate)</option>
-                    <option value="B2">B2 (Upper Intermediate - Preporučeno)</option>
-                    <option value="C1">C1 (Advanced)</option>
-                    <option value="C2">C2 (Proficient / Fluent)</option>
-                  </select>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* TAB 2: DATUMI DOSTUPNOSTI ZA RAD U SAD */}
-          {activeTab === "availability" && (
-            <div className="space-y-5">
-              <div className="rounded-xl bg-amber-50 p-4 text-xs text-amber-950">
-                <span className="font-semibold">Važno za J-1 vizu:</span> Datumi rada moraju biti usklađeni sa zvaničnim letnjim raspustom na vašem fakultetu (najranije od 20. maja do najkasnije 1. oktobra za studente iz Srbije).
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                <div className="rounded-2xl border border-line bg-white p-5 sm:p-6">
-                  <span className="text-xs font-semibold text-ink-3">
-                    Najraniji početak rada
-                  </span>
-                  <label className="block text-xs font-semibold text-ink mt-1 mb-1">
-                    Start Date (SAD):
-                  </label>
-                  <input
-                    type="date"
-                    required
-                    value={f.startDate}
-                    onChange={upd("startDate")}
-                    className="w-full rounded-lg border border-line-strong bg-white px-3 py-2 text-sm tabular-nums font-semibold"
-                  />
-                  <p className="mt-1 text-xs text-ink-3">
-                    Dan kada ste spremni da počnete rad kod poslodavca.
-                  </p>
-                </div>
-
-                <div className="rounded-2xl border border-line bg-white p-5 sm:p-6">
-                  <span className="text-xs font-semibold text-ink-3">
-                    Poslednji dan rada
-                  </span>
-                  <label className="block text-xs font-semibold text-ink mt-1 mb-1">
-                    End Date (SAD):
-                  </label>
-                  <input
-                    type="date"
-                    required
-                    value={f.endDate}
-                    onChange={upd("endDate")}
-                    className="w-full rounded-lg border border-line-strong bg-white px-3 py-2 text-sm tabular-nums font-semibold"
-                  />
-                  <p className="mt-1 text-xs text-ink-3">
-                    Zvaničan završetak radnog angažmana.
-                  </p>
-                </div>
-
-                <div className="rounded-2xl border border-line bg-white p-5 sm:p-6">
-                  <span className="text-xs font-semibold text-ink-3">
-                    Grace period za putovanje
-                  </span>
-                  <label className="block text-xs font-semibold text-ink mt-1 mb-1">
-                    Povratak u Srbiju:
-                  </label>
-                  <input
-                    type="date"
-                    required
-                    value={f.travelUntil}
-                    onChange={upd("travelUntil")}
-                    className="w-full rounded-lg border border-line-strong bg-white px-3 py-2 text-sm tabular-nums font-semibold"
-                  />
-                  <p className="mt-1 text-xs text-ink-3">
-                    Maksimalno 30 dana nakon isteka DS-2019 za putovanja.
-                  </p>
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-ink-2 mb-1">
-                  Napomena o ispitnom roku i fleksibilnosti:
-                </label>
-                <textarea
-                  rows={3}
-                  value={f.availabilityNotes}
-                  onChange={upd("availabilityNotes")}
-                  placeholder="npr. Ispite u junskom roku polažem u predroku do 20. maja. Moguće produženje rada za još nedelju dana po dogovoru sa menadžerom."
-                  className="w-full rounded-xl border border-line-strong bg-white p-3 text-xs focus:border-ink focus:outline-hidden"
-                />
-              </div>
-            </div>
-          )}
-
-          {/* TAB 3: CV BUILDER & RADNO ISKUSTVO */}
-          {activeTab === "experience" && (
-            <div className="space-y-6">
-              <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
-                <div>
-                  <h3 className="text-sm font-semibold text-ink">
-                    Radno iskustvo na engleskom jeziku (CV Timeline)
-                  </h3>
-                  <p className="text-xs text-ink-3">
-                    Unesite sve poslove, prakse ili sezonske poslove koje ste radili.
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setShowAddExp(!showAddExp)}
-                  className="inline-flex items-center gap-1.5 rounded-full bg-ink px-3 py-1.5 text-xs font-semibold text-white hover:bg-neutral-950 transition-colors"
-                >
-                  <span>{showAddExp ? "✕ Zatvori unos" : "+ Dodaj radno iskustvo"}</span>
-                </button>
-              </div>
-
-              {/* Forma za dodavanje nove pozicije */}
-              {showAddExp && (
-                <div className="rounded-xl border-2 border-ink bg-surface p-4 space-y-3">
-                  <span className="font-semibold text-[13px] text-ink">
-                    Nova radna pozicija
-                  </span>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-xs font-semibold text-ink-2 mb-0.5">
-                        Pozicija (na engleskom):
-                      </label>
-                      <input
-                        type="text"
-                        placeholder="npr. Server / Waiter, Lifeguard, Front Desk..."
-                        value={newExp.position}
-                        onChange={(e) => setNewExp({ ...newExp, position: e.target.value })}
-                        className="w-full rounded-lg border border-line-strong bg-white px-3 py-1.5 text-xs"
-                      />
+      {/* 3. Iskustvo i veštine */}
+      {activeTab === "experience" && (
+        <div className="space-y-8">
+          <SheetSection title="Radno iskustvo" hint="Poslovi, prakse, sezonski rad — piši na engleskom.">
+            {f.workExperience.length > 0 && (
+              <ul className="divide-y divide-line rounded-xl border border-line">
+                {f.workExperience.map((exp) => (
+                  <li key={exp.id} className="flex items-start gap-3 px-4 py-3.5">
+                    <div className="min-w-0 flex-1">
+                      <p className="text-[15px] font-medium text-ink">{exp.position}</p>
+                      <p className="text-[13px] text-ink-3">
+                        {[exp.employer, exp.city, exp.period].filter(Boolean).join(" · ")}
+                      </p>
+                      {exp.duties && <p className="mt-1.5 text-[13px] leading-relaxed text-ink-2">{exp.duties}</p>}
                     </div>
-                    <div>
-                      <label className="block text-xs font-semibold text-ink-2 mb-0.5">
-                        Poslodavac / Firma:
-                      </label>
-                      <input
-                        type="text"
-                        placeholder="npr. Hotel Hyatt Regency, Caffe Bar..."
-                        value={newExp.employer}
-                        onChange={(e) => setNewExp({ ...newExp, employer: e.target.value })}
-                        className="w-full rounded-lg border border-line-strong bg-white px-3 py-1.5 text-xs"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-xs font-semibold text-ink-2 mb-0.5">
-                        Grad i država:
-                      </label>
-                      <input
-                        type="text"
-                        placeholder="npr. Beograd, Srbija"
-                        value={newExp.city}
-                        onChange={(e) => setNewExp({ ...newExp, city: e.target.value })}
-                        className="w-full rounded-lg border border-line-strong bg-white px-3 py-1.5 text-xs"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-semibold text-ink-2 mb-0.5">
-                        Period rada:
-                      </label>
-                      <input
-                        type="text"
-                        placeholder="npr. Jun 2024 - Septembar 2024"
-                        value={newExp.period}
-                        onChange={(e) => setNewExp({ ...newExp, period: e.target.value })}
-                        className="w-full rounded-lg border border-line-strong bg-white px-3 py-1.5 text-xs"
-                      />
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-semibold text-ink-2 mb-0.5">
-                      Ključna zaduženja i veštine (Duties & Responsibilities):
-                    </label>
-                    <textarea
-                      rows={2}
-                      placeholder="npr. Taking orders, managing table turnover, handling cash & card payments, communicating with international guests in English."
-                      value={newExp.duties}
-                      onChange={(e) => setNewExp({ ...newExp, duties: e.target.value })}
-                      className="w-full rounded-lg border border-line-strong bg-white p-2 text-xs"
-                    />
-                  </div>
-
-                  <div className="flex justify-end gap-2 pt-2">
                     <button
                       type="button"
-                      onClick={() => setShowAddExp(false)}
-                      className="rounded-lg bg-surface-2 px-3 py-1.5 text-xs font-semibold text-ink-2"
+                      onClick={() => handleRemoveExperience(exp.id)}
+                      aria-label={`Ukloni ${exp.position}`}
+                      className="-mr-1.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-ink-3 hover:bg-surface hover:text-red-600"
                     >
-                      Odustani
+                      <svg viewBox="0 0 20 20" className="h-4 w-4" aria-hidden="true">
+                        <path d="M5 5l10 10M15 5L5 15" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+                      </svg>
                     </button>
-                    <button
-                      type="button"
-                      onClick={handleAddExperience}
-                      className="rounded-full bg-emerald-600 px-4 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700"
-                    >
-                      Sačuvaj poziciju u CV
-                    </button>
-                  </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+
+            {showAddExp ? (
+              <div className="space-y-4 rounded-xl border border-line-strong p-4">
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <FormField label="Pozicija">
+                    <input type="text" placeholder="Waiter, Lifeguard…" value={newExp.position} onChange={(e) => setNewExp({ ...newExp, position: e.target.value })} className={inp} />
+                  </FormField>
+                  <FormField label="Poslodavac">
+                    <input type="text" placeholder="Hotel Hyatt" value={newExp.employer} onChange={(e) => setNewExp({ ...newExp, employer: e.target.value })} className={inp} />
+                  </FormField>
+                  <FormField label="Grad">
+                    <input type="text" placeholder="Beograd, Srbija" value={newExp.city} onChange={(e) => setNewExp({ ...newExp, city: e.target.value })} className={inp} />
+                  </FormField>
+                  <FormField label="Period">
+                    <input type="text" placeholder="Jun – Sep 2024" value={newExp.period} onChange={(e) => setNewExp({ ...newExp, period: e.target.value })} className={inp} />
+                  </FormField>
                 </div>
-              )}
-
-              {/* Lista unetih radnih iskustava */}
-              <div className="space-y-3">
-                {f.workExperience.length === 0 ? (
-                  <div className="rounded-xl border border-dashed border-line-strong p-6 text-center text-xs text-ink-3">
-                    Nema unetog radnog iskustva. Kliknite na "+ Dodaj radno iskustvo" iznad kako biste uneli svoje prethodne poslove.
-                  </div>
-                ) : (
-                  f.workExperience.map((exp) => (
-                    <div
-                      key={exp.id}
-                      className="flex flex-col sm:flex-row sm:items-start justify-between gap-3 rounded-xl border border-line bg-white p-4 hover:border-line-strong transition-all"
-                    >
-                      <div className="space-y-1">
-                        <div className="flex items-center gap-2">
-                          <span className="text-base font-semibold leading-snug text-ink">{exp.position}</span>
-                          <span className="rounded-md bg-surface-2 px-2 py-0.5 text-xs font-semibold text-ink-2">
-                            {exp.employer} ({exp.city})
-                          </span>
-                        </div>
-                        <p className="text-xs tabular-nums text-ink-3">{exp.period}</p>
-                        <p className="text-xs text-ink-2 mt-1.5 leading-relaxed">{exp.duties}</p>
-                      </div>
-
-                      <button
-                        type="button"
-                        onClick={() => handleRemoveExperience(exp.id)}
-                        className="rounded-lg p-1.5 text-neutral-400 hover:bg-red-50 hover:text-red-600 transition-colors shrink-0 self-end sm:self-start"
-                        title="Ukloni poziciju"
-                      >
-                        <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                        </svg>
-                      </button>
-                    </div>
-                  ))
-                )}
-              </div>
-
-              {/* Veštine (Skills) */}
-              <div className="border-t border-line pt-4 space-y-3">
-                <label className="block text-xs font-semibold text-ink">
-                  Ključne veštine (Skills for US employers):
-                </label>
-                <div className="flex flex-wrap gap-1.5">
-                  {POPULAR_SKILLS.map((sk) => {
-                    const isSelected = f.skills.includes(sk);
-                    return (
-                      <button
-                        key={sk}
-                        type="button"
-                        onClick={() => handleToggleSkill(sk)}
-                        className={`rounded-lg px-2.5 py-1 text-xs font-semibold transition-all ${
-                          isSelected
-                            ? "bg-ink text-white"
-                            : "bg-surface-2 text-ink-2 hover:bg-neutral-200"
-                        }`}
-                      >
-                        {isSelected ? "✓ " : "+ "}
-                        {sk}
-                      </button>
-                    );
-                  })}
-                </div>
-
-                <div className="flex gap-2 pt-1">
-                  <input
-                    type="text"
-                    placeholder="Dodajte sopstvenu specifičnu veštinu..."
-                    value={customSkill}
-                    onChange={(e) => setCustomSkill(e.target.value)}
-                    className="flex-1 rounded-lg border border-line-strong bg-white px-3 py-1.5 text-xs"
+                <FormField label="Šta si radio">
+                  <textarea
+                    rows={2}
+                    placeholder="Taking orders, handling payments, talking to international guests…"
+                    value={newExp.duties}
+                    onChange={(e) => setNewExp({ ...newExp, duties: e.target.value })}
+                    className={inp}
                   />
-                  <button
-                    type="button"
-                    onClick={handleAddCustomSkill}
-                    className="rounded-full bg-neutral-200 px-3 py-1.5 text-xs font-semibold text-ink hover:bg-neutral-300"
-                  >
-                    Dodaj veštinu
-                  </button>
+                </FormField>
+                <div className="flex justify-end gap-2.5">
+                  <Button variant="ghost" size="sm" onClick={() => setShowAddExp(false)}>
+                    Otkaži
+                  </Button>
+                  <Button variant="dark" size="sm" onClick={handleAddExperience} disabled={!newExp.position.trim() || !newExp.employer.trim()}>
+                    Dodaj
+                  </Button>
                 </div>
               </div>
-            </div>
-          )}
-
-          {/* TAB 4: PREFERENCIJE POSLA I LOKACIJE U SAD */}
-          {activeTab === "preferences" && (
-            <div className="space-y-5">
-              <div className="rounded-xl bg-emerald-50 p-3 text-xs text-emerald-950">
-                <strong>Matchmaking sa poslodavcima:</strong> Na osnovu ovih preferencija agencija vam predlaže odgovarajuće opcije na Sajmu poslova (Job Fair).
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-semibold text-ink-2 mb-1">Željeni tip posla:</label>
-                  <select
-                    value={f.jobType}
-                    onChange={upd("jobType")}
-                    className="w-full rounded-xl border border-line-strong bg-white px-3 py-2 text-sm focus:border-ink focus:outline-hidden"
-                  >
-                    <option value="Food & Beverage / Lifeguard">Restorani & Ugostiteljstvo / Spasioci</option>
-                    <option value="Hotelijerstvo & Housekeeping">Hotelijerstvo & Housekeeping</option>
-                    <option value="Spasilac na bazenu (Lifeguard)">Spasilac na bazenu (Lifeguard)</option>
-                    <option value="Zabavni parkovi & Atrakcije">Zabavni parkovi & Resort atrakcije</option>
-                    <option value="Maloprodaja / Retail & Trgovina">Maloprodaja / Retail & Gift shops</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-ink-2 mb-1">Tip geografske lokacije:</label>
-                  <select
-                    value={f.locationType}
-                    onChange={upd("locationType")}
-                    className="w-full rounded-xl border border-line-strong bg-white px-3 py-2 text-sm focus:border-ink focus:outline-hidden"
-                  >
-                    <option value="Morska obala & Plaže">Morska obala & Plaže (East/West Coast)</option>
-                    <option value="Nacionalni parkovi i planinska jezera">Nacionalni parkovi i planinska jezera (Rocky Mtns, Alaska)</option>
-                    <option value="Poznata turistička ostrva">Ostrva (Martha's Vineyard, Nantucket, Block Island)</option>
-                    <option value="Gradske i univerzitetske sredine">Gradske i turističke sredine</option>
-                  </select>
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-ink-2 mb-1.5">
-                  Preferirane savezne države u SAD (izaberite jednu ili više):
-                </label>
-                <div className="flex flex-wrap gap-1.5">
-                  {US_STATES.map((st) => {
-                    const isSelected = f.preferredStates.includes(st);
-                    return (
-                      <button
-                        key={st}
-                        type="button"
-                        onClick={() => handleToggleState(st)}
-                        className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition-all ${
-                          isSelected
-                            ? "bg-ink text-white"
-                            : "bg-surface-2 text-ink-2 hover:bg-neutral-200"
-                        }`}
-                      >
-                        {isSelected ? "✓ " : ""}
-                        {st}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 border-t border-line pt-4">
-                <div>
-                  <label className="block text-xs font-semibold text-ink-2 mb-1">Preferencija smeštaja:</label>
-                  <select
-                    value={f.housingPreference}
-                    onChange={upd("housingPreference")}
-                    className="w-full rounded-xl border border-line-strong bg-white px-3 py-2 text-sm focus:border-ink focus:outline-hidden"
-                  >
-                    <option value="Smeštaj obezbeđen od poslodavca">Smeštaj obezbeđen od poslodavca (Preporučeno)</option>
-                    <option value="Asistirani smeštaj od strane sponzora">Asistirani smeštaj od strane sponzora</option>
-                    <option value="Sopstveni smeštaj">Imam sopstveni smeštaj (kod rođaka/prijatelja)</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-ink-2 mb-1">Putujem sa cimerom / prijateljem:</label>
-                  <input
-                    type="text"
-                    value={f.travelingWith}
-                    onChange={upd("travelingWith")}
-                    placeholder="npr. Ana Jovanović (Ime i prezime para)"
-                    className="w-full rounded-xl border border-line-strong bg-white px-3.5 py-2 text-sm focus:border-ink focus:outline-hidden"
-                  />
-                  <span className="text-2xs text-ink-3">Ostavite prazno ako se prijavljujete samostalno.</span>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* TAB 5: VIDEO PREZENTACIJA */}
-          {activeTab === "video" && (
-            <div className="space-y-5">
-              <div className="rounded-xl bg-red-50 p-4">
-                <div className="flex items-start gap-3">
-                  <div className="space-y-1">
-                    <h4 className="font-semibold text-[13px] text-red-950">
-                      60-sekundni video na engleskom jeziku
-                    </h4>
-                    <p className="text-xs text-red-900 leading-relaxed">
-                      Američki poslodavci donose odluku o intervjuu prvenstveno na osnovu vašeg videa! Video treba da traje između 60 i 90 sekundi.
-                    </p>
-                  </div>
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-ink mb-1">
-                  Link ka video snimku (YouTube / Loom / Vimeo):
-                </label>
-                <input
-                  type="url"
-                  required
-                  value={f.youtubeUrl}
-                  onChange={upd("youtubeUrl")}
-                  placeholder="npr. https://www.youtube.com/watch?v=... ili https://www.loom.com/share/..."
-                  className="w-full rounded-xl border border-line-strong bg-white px-3.5 py-2 text-sm tabular-nums focus:border-ink focus:outline-hidden"
-                />
-                <span className="text-xs text-ink-3 mt-1 block">
-                  Možete okačiti video kao "Unlisted" (Nelistiran) na YouTube-u kako bi ga videli samo poslodavci i agencija.
-                </span>
-              </div>
-
-              {/* Live Preview */}
-              {embedVideoUrl ? (
-                <div className="space-y-2">
-                  <span className="text-xs font-semibold text-ink-2">Preview vašeg videa:</span>
-                  <div className="aspect-video w-full max-w-xl overflow-hidden rounded-xl border-2 border-ink bg-ink shadow-md">
-                    <iframe
-                      src={embedVideoUrl}
-                      title="Video prezentacija"
-                      className="w-full h-full"
-                      allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                      allowFullScreen
-                    />
-                  </div>
-                  <span className="text-xs font-semibold text-emerald-700 block">
-                    ✓ Video je ispravno prepoznat i spreman za američke poslodavce!
-                  </span>
-                </div>
-              ) : f.youtubeUrl ? (
-                <div className="rounded-lg bg-amber-50 p-3 text-xs text-amber-900">
-                  Link je sačuvan: <a href={f.youtubeUrl} target="_blank" rel="noreferrer" className="underline font-semibold">{f.youtubeUrl}</a>
-                </div>
-              ) : null}
-
-              {/* Uputstvo za snimanje */}
-              <div className="rounded-2xl border border-line bg-white p-5 space-y-2 text-xs sm:p-6">
-                <span className="font-semibold text-ink uppercase tracking-wide">
-                  Struktura idealnog 60-sekundnog videa:
-                </span>
-                <ol className="list-decimal list-inside space-y-1 text-ink-2">
-                  <li><strong>0:00 – 0:15:</strong> Predstavite se na engleskom (Ime, grad, fakultet i hobi).</li>
-                  <li><strong>0:15 – 0:35:</strong> Zašto želite da dođete u SAD i zašto ste izabrali Work & Travel program.</li>
-                  <li><strong>0:35 – 0:50:</strong> Prethodno radno iskustvo i zašto ste pouzdan, vredan radnik.</li>
-                  <li><strong>0:50 – 1:00:</strong> Pozdrav poslodavcu sa osmehom (<i>"Looking forward to meeting you this summer in the US!"</i>).</li>
-                </ol>
-              </div>
-            </div>
-          )}
-
-          {/* Footer akcije */}
-          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line pt-4 mt-6">
-            <button
-              type="button"
-              onClick={onClose}
-              className="rounded-full border border-line-strong bg-white px-4 py-2 text-xs font-semibold text-ink-2 hover:bg-surface-2 transition-colors"
-            >
-              Odustani
-            </button>
-
-            <div className="flex items-center gap-2">
+            ) : (
               <button
                 type="button"
-                onClick={() => window.print()}
-                className="inline-flex items-center gap-1.5 rounded-full border border-line-strong bg-white px-3.5 py-2 text-xs font-semibold text-ink hover:bg-surface-2 transition-colors"
+                onClick={() => setShowAddExp(true)}
+                className="flex w-full items-center justify-center gap-2 rounded-xl border border-dashed border-line-strong py-3.5 text-sm font-medium text-ink hover:border-ink/40 hover:bg-surface"
               >
-                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
-                </svg>
-                <span>Štampaj CV (PDF)</span>
+                <span aria-hidden="true" className="text-lg leading-none">+</span>
+                {f.workExperience.length ? "Dodaj još jedan posao" : "Dodaj posao"}
               </button>
+            )}
+          </SheetSection>
 
-              <button
-                type="submit"
-                className="rounded-full bg-ink px-6 py-2.5 text-[13px] font-semibold text-white shadow-md hover:bg-neutral-950 transition-all"
-              >
-                Sačuvaj studentski profil & CV (Korak 2.1) ✓
-              </button>
+          <SheetSection title="Veštine" hint="Izaberi ono što stvarno znaš.">
+            <div className="flex flex-wrap gap-2">
+              {[...POPULAR_SKILLS, ...f.skills.filter((sk) => !POPULAR_SKILLS.includes(sk))].map((sk) => (
+                <Chip key={sk} selected={f.skills.includes(sk)} onClick={() => handleToggleSkill(sk)}>
+                  {sk}
+                </Chip>
+              ))}
             </div>
-          </div>
-        </form>
-      </div>
-    </div>
+            <div className="flex gap-2">
+              <input
+                type="text"
+                placeholder="Druga veština"
+                value={customSkill}
+                onChange={(e) => setCustomSkill(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && handleAddCustomSkill(e)}
+                className={cx(inp, "flex-1")}
+              />
+              <Button variant="outline" onClick={handleAddCustomSkill} disabled={!customSkill.trim()}>
+                Dodaj
+              </Button>
+            </div>
+          </SheetSection>
+        </div>
+      )}
+
+      {/* 4. Posao i lokacija */}
+      {activeTab === "preferences" && (
+        <div className="space-y-8">
+          <SheetSection title="Kakav posao tražiš" hint="Po ovome ti biramo ponude.">
+            <div className="grid gap-4 sm:grid-cols-2">
+              <FormField label="Vrsta posla">
+                <select value={f.jobType} onChange={upd("jobType")} className={inp}>
+                  <option value="">Svejedno</option>
+                  <option value="Food & Beverage / Lifeguard">Restorani i ugostiteljstvo</option>
+                  <option value="Hotelijerstvo & Housekeeping">Hotelijerstvo i housekeeping</option>
+                  <option value="Spasilac na bazenu (Lifeguard)">Spasilac (lifeguard)</option>
+                  <option value="Zabavni parkovi & Atrakcije">Zabavni parkovi i atrakcije</option>
+                  <option value="Maloprodaja / Retail & Trgovina">Prodavnice (retail)</option>
+                </select>
+              </FormField>
+              <FormField label="Vrsta mesta">
+                <select value={f.locationType} onChange={upd("locationType")} className={inp}>
+                  <option value="">Svejedno</option>
+                  <option value="Morska obala & Plaže">More i plaže</option>
+                  <option value="Nacionalni parkovi i planinska jezera">Nacionalni parkovi i planine</option>
+                  <option value="Poznata turistička ostrva">Ostrva</option>
+                  <option value="Gradske i univerzitetske sredine">Grad</option>
+                </select>
+              </FormField>
+            </div>
+          </SheetSection>
+
+          <SheetSection title="Države" hint="Jedna ili više, nije obavezno.">
+            <div className="flex flex-wrap gap-2">
+              {US_STATES.map((st) => (
+                <Chip key={st} selected={f.preferredStates.includes(st)} onClick={() => handleToggleState(st)}>
+                  {st}
+                </Chip>
+              ))}
+            </div>
+          </SheetSection>
+
+          <SheetSection title="Smeštaj i društvo">
+            <div className="grid gap-4 sm:grid-cols-2">
+              <FormField label="Smeštaj">
+                <select value={f.housingPreference} onChange={upd("housingPreference")} className={inp}>
+                  <option value="Smeštaj obezbeđen od poslodavca">Obezbeđuje poslodavac</option>
+                  <option value="Asistirani smeštaj od strane sponzora">Pomaže sponzor</option>
+                  <option value="Sopstveni smeštaj">Imam svoj smeštaj</option>
+                </select>
+              </FormField>
+              <FormField label="Putujem sa" hint="Ostavi „Samostalno“ ako ideš sam.">
+                <input type="text" value={f.travelingWith} onChange={upd("travelingWith")} placeholder="Ime i prezime" className={inp} />
+              </FormField>
+            </div>
+          </SheetSection>
+        </div>
+      )}
+
+      {/* 5. Video */}
+      {activeTab === "video" && (
+        <div className="space-y-6">
+          <FormField label="Link do videa" hint="YouTube (može „Unlisted“), Loom ili Vimeo. 60–90 sekundi, na engleskom.">
+            <input
+              type="url"
+              required
+              inputMode="url"
+              value={f.youtubeUrl}
+              onChange={upd("youtubeUrl")}
+              placeholder="https://youtu.be/…"
+              className={inp}
+            />
+          </FormField>
+
+          {embedVideoUrl ? (
+            <iframe
+              src={embedVideoUrl}
+              title="Video predstavljanje"
+              className="aspect-video w-full max-w-lg rounded-xl border border-line bg-ink"
+              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+              allowFullScreen
+            />
+          ) : null}
+
+          <SheetSection title="Šta da kažeš za 60 sekundi">
+            <ol className="divide-y divide-line rounded-xl border border-line">
+              {[
+                ["0:00", "Ko si: ime, grad, fakultet, hobi."],
+                ["0:15", "Zašto SAD i Work and Travel."],
+                ["0:35", "Gde si radio i zašto si pouzdan."],
+                ["0:50", "Pozdrav sa osmehom — „Looking forward to meeting you!“"],
+              ].map(([t, x]) => (
+                <li key={t} className="flex gap-4 px-4 py-3 text-sm">
+                  <span className="w-10 shrink-0 font-medium tabular-nums text-ink-3">{t}</span>
+                  <span className="text-ink-2">{x}</span>
+                </li>
+              ))}
+            </ol>
+          </SheetSection>
+        </div>
+      )}
+    </Sheet>
   );
 }

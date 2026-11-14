@@ -5,6 +5,8 @@ import {
   downloadResponsibilityStatementPdf,
 } from "../../../data/candidateStore";
 import { CheckIcon, UploadIcon } from "../icons";
+import { Button, cx } from "../../ui";
+import Sheet, { SheetFooter, FormField, Hint, fieldInputCls as inp } from "../Sheet";
 
 export default function SignContractModal({
   candidate,
@@ -68,7 +70,7 @@ export default function SignContractModal({
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!selectedFile) {
-      setError("Molimo priložite skeniran ili fotografisan fajl potpisanog ugovora (.pdf, .jpg, .png).");
+      setError("Izaberi fajl potpisanog ugovora (PDF ili slika).");
       return;
     }
     if (jmbg.trim() || passport.trim()) {
@@ -99,287 +101,131 @@ export default function SignContractModal({
     await onUploadSignedContract(realFile);
   };
 
+  const linkCls = "text-[13px] font-medium text-ink underline decoration-line-strong underline-offset-4 hover:decoration-ink";
+  const Num = ({ n }) => (
+    <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-ink text-xs font-semibold text-white">{n}</span>
+  );
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-xs">
-      <div className="relative max-h-[92vh] w-full max-w-2xl overflow-y-auto rounded-3xl bg-white p-6 shadow-2xl sm:p-8">
-        <button
-          type="button"
-          onClick={onClose}
-          className="absolute right-5 top-5 rounded-full p-2 text-ink-3 hover:bg-surface-2 hover:text-ink"
+    <Sheet
+      onClose={onClose}
+      title="Potpiši ugovor"
+      subtitle="Bez potpisanog ugovora uplatnica se ne otvara."
+      footer={
+        <SheetFooter
+          left={
+            <button type="button" onClick={handleQuickDemoSubmit} disabled={isUploading} className={linkCls}>
+              Demo primer
+            </button>
+          }
         >
-          ✕
-        </button>
-
-        <div className="flex items-center gap-3">
-          <div>
-            <h3 className="text-xl font-bold text-ink">
-              Preuzimanje i kačenje potpisanog ugovora
-            </h3>
-            <p className="text-xs text-ink-3">
-              Obavezan korak pre bilo kakve uplate troškova programa Work & Travel USA 2026.
-            </p>
-          </div>
-        </div>
-
-        {/* Info banner */}
-        <div className="mt-5 rounded-2xl bg-amber-50 p-4 text-xs text-amber-950">
-          <p className="font-semibold flex items-center gap-1.5">
-            Pravilo agencije o uplatama:
-          </p>
-          <p className="mt-1 leading-relaxed">
-            Pre bilo kakve uplate troškova programa ili generisanja uplatnice sa IPS QR kodom, obavezno je da <strong>preuzmete</strong> popunjenu dokumentaciju, <strong>odštampate</strong> je, <strong>svojeručno potpišete</strong>, te <strong>skenirate ili uslikate</strong> i okačite nazad u portal.
-          </p>
-        </div>
-
+          <Button variant="primary" onClick={handleSubmit} disabled={isUploading || !selectedFile}>
+            {isUploading ? "Kačenje…" : "Okači ugovor"}
+          </Button>
+        </SheetFooter>
+      }
+    >
+      <div className="space-y-8">
         {hasExisting && (
-          <div className="mt-4 rounded-xl bg-emerald-50 p-3.5 text-xs text-emerald-900 flex items-start gap-2.5">
-            <CheckIcon className="h-5 w-5 text-emerald-700 shrink-0 mt-0.5" />
-            <div>
-              <p className="font-semibold">Potpisani ugovor je već evidentiran:</p>
-              <p className="tabular-nums text-xs text-emerald-800 mt-0.5">
-                {candidate.signedContractFileName || "Potpisani_Ugovor.pdf"}
-                {candidate.signedContractUploadedAt && ` (okačeno: ${new Date(candidate.signedContractUploadedAt).toLocaleString("sr-RS")})`}
-              </p>
-              <p className="mt-1 text-emerald-800/80 text-xs">
-                Ako želite da zamenite fajl novom verzijom, izaberite novi fajl ispod.
-              </p>
-            </div>
-          </div>
+          <Hint>
+            Već si okačio <span className="font-medium text-ink">{candidate.signedContractFileName || "potpisani ugovor"}</span>
+            {candidate.signedContractUploadedAt && ` (${new Date(candidate.signedContractUploadedAt).toLocaleDateString("sr-RS")})`}. Novi fajl
+            zamenjuje stari.
+          </Hint>
         )}
 
-        {/* Podaci kandidata za popunjavanje */}
-        <div className="mt-5 rounded-2xl border border-line bg-surface p-4 space-y-3">
-          <p className="text-xs font-semibold text-ink">
-            Podaci kandidata za automatsko popunjavanje ugovora:
-          </p>
-          <div className="grid gap-3 sm:grid-cols-2">
+        <section className="flex gap-4">
+          <Num n={1} />
+          <div className="min-w-0 flex-1 space-y-4">
             <div>
-              <label className="block text-xs font-semibold text-ink-2 mb-1">
-                Ime i prezime kandidata
-              </label>
-              <input
-                type="text"
-                disabled
-                value={`${candidate.firstName || ""} ${candidate.lastName || ""}`.trim() || candidate.name || ""}
-                className="w-full rounded-xl border border-line bg-surface px-3.5 py-2 text-xs font-semibold text-ink-2 cursor-not-allowed"
-              />
+              <h3 className="text-[15px] font-semibold text-ink">Proveri podatke</h3>
+              <p className="mt-0.5 text-[13px] text-ink-3">
+                {`${candidate.firstName || ""} ${candidate.lastName || ""}`.trim() || candidate.name} · {candidate.email}
+              </p>
             </div>
-
-            <div>
-              <label className="block text-xs font-semibold text-ink-2 mb-1">
-                E-mail adresa
-              </label>
-              <input
-                type="email"
-                disabled
-                value={candidate.email}
-                className="w-full rounded-xl border border-line bg-surface px-3.5 py-2 text-xs font-semibold text-ink-2 cursor-not-allowed"
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs font-semibold text-ink-2 mb-1">
-                JMBG (13 cifara) <span className="text-red-500">*</span>
-              </label>
-              <input
-                type="text"
-                maxLength={13}
-                value={jmbg}
-                onChange={(e) => setJmbg(e.target.value.replace(/\D/g, ""))}
-                placeholder="Unesite 13 cifara JMBG-a"
-                className="w-full rounded-xl border border-line-strong bg-white px-3.5 py-2 text-xs tabular-nums font-semibold focus:border-ink focus:outline-hidden"
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs font-semibold text-ink-2 mb-1">
-                Broj pasoša <span className="text-red-500">*</span>
-              </label>
-              <input
-                type="text"
-                value={passport}
-                onChange={(e) => setPassport(e.target.value)}
-                placeholder="npr. 010948212"
-                className="w-full rounded-xl border border-line-strong bg-white px-3.5 py-2 text-xs tabular-nums font-semibold focus:border-ink focus:outline-hidden"
-              />
+            <div className="grid gap-4 sm:grid-cols-2">
+              <FormField label="JMBG">
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  maxLength={13}
+                  value={jmbg}
+                  onChange={(e) => setJmbg(e.target.value.replace(/\D/g, ""))}
+                  placeholder="13 cifara"
+                  className={inp + " tabular-nums"}
+                />
+              </FormField>
+              <FormField label="Broj pasoša">
+                <input type="text" value={passport} onChange={(e) => setPassport(e.target.value)} placeholder="010948212" className={inp + " tabular-nums"} />
+              </FormField>
             </div>
           </div>
-        </div>
+        </section>
 
-        {/* 4 koraka */}
-        <div className="mt-5 space-y-4">
-          <div className="rounded-2xl border border-line bg-white p-4 space-y-3">
-            <div className="flex items-start gap-2.5">
-              <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-brand text-xs font-bold text-ink">
-                1
-              </span>
-              <div>
-                <p className="text-xs font-semibold text-ink">
-                  Preuzmite zvaničnu ugovornu dokumentaciju (PDF)
-                </p>
-                <p className="text-xs text-ink-3">
-                  Preuzmite originalna pravna dokumenta agencije American Adventure sa svim članovima i 16 tačaka Izjave o odgovornosti:
-                </p>
-                <div className="mt-2.5 flex flex-wrap gap-2">
-                  <a
-                    href={isSelf ? "/documents/SELF_UGOVOR_2027.pdf" : "/documents/FULL_Lifeguard_UGOVOR_2027.pdf"}
-                    download
-                    className="inline-flex items-center gap-1.5 rounded-full border border-line-strong bg-white px-3 py-1.5 text-xs font-semibold text-ink hover:bg-surface-2"
-                  >
-                    Originalni Ugovor agencije (PDF)
-                  </a>
-                  <a
-                    href="/documents/Izjava_o_odgovornosti_2027.pdf"
-                    download
-                    className="inline-flex items-center gap-1.5 rounded-full border border-line-strong bg-white px-3 py-1.5 text-xs font-semibold text-ink hover:bg-surface-2"
-                  >
-                    Izjava o odgovornosti (PDF)
-                  </a>
-                  <a
-                    href="/documents/Saglasnost_Vazne_informacije_SWT_USA_2027.pdf"
-                    download
-                    className="inline-flex items-center gap-1.5 rounded-full border border-line-strong bg-white px-3 py-1.5 text-xs font-semibold text-ink hover:bg-surface-2"
-                  >
-                    Saglasnost & Važne info (PDF)
-                  </a>
-                  <button
-                    type="button"
-                    onClick={handleDownloadBoth}
-                    className="inline-flex items-center gap-1.5 rounded-full bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-950 hover:bg-amber-100"
-                  >
-                    Popunjeni ugovorni obrazac sa JMBG (Print/PDF)
-                  </button>
-                </div>
-              </div>
+        <section className="flex gap-4">
+          <Num n={2} />
+          <div className="min-w-0 flex-1 space-y-3">
+            <div>
+              <h3 className="text-[15px] font-semibold text-ink">Preuzmi, odštampaj i potpiši</h3>
+              <p className="mt-0.5 text-[13px] leading-relaxed text-ink-3">
+                Na A4 papiru, plavom ili crnom hemijskom, na mestu „Potpis kandidata“.
+              </p>
             </div>
-
-            <hr className="border-line my-2" />
-
-            <div className="flex items-start gap-2.5">
-              <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-neutral-200 text-xs font-bold text-ink">
-                2
-              </span>
-              <div>
-                <p className="text-xs font-semibold text-ink">
-                  Odštampajte na papir i svojeručno potpišite olovkom
-                </p>
-                <p className="text-xs text-ink-3">
-                  Odštampajte dokumente na A4 formatu i plavom ili crnom hemijskom olovkom potpišite na polju „Potpis kandidata / davaoca izjave”.
-                </p>
-              </div>
-            </div>
-
-            <hr className="border-line my-2" />
-
-            {/* Korak 3: Upload */}
-            <div className="flex items-start gap-2.5">
-              <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-ink text-xs font-bold text-white">
-                3
-              </span>
-              <div className="w-full">
-                <p className="text-xs font-semibold text-ink">
-                  Skenirajte ili uslikajte telefonom i okačite ovde
-                </p>
-                <p className="text-xs text-ink-3 mb-2">
-                  Format: PDF, JPG, PNG ili slika visoke rezolucije sa jasnim potpisom.
-                </p>
-
-                <div
-                  onDragOver={(e) => {
-                    e.preventDefault();
-                    setDragOver(true);
-                  }}
-                  onDragLeave={() => setDragOver(false)}
-                  onDrop={handleDrop}
-                  onClick={() => fileInputRef.current?.click()}
-                  className={`cursor-pointer rounded-xl border-2 border-dashed p-4 text-center transition-all ${
-                    dragOver
-                      ? "border-ink bg-amber-50/50"
-                      : selectedFile
-                      ? "bg-emerald-50"
-                      : "border-line-strong hover:border-line-strong bg-surface"
-                  }`}
-                >
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    accept=".pdf,image/png,image/jpeg,image/jpg"
-                    onChange={handleFileChange}
-                    className="hidden"
-                  />
-
-                  {selectedFile ? (
-                    <div className="flex items-center justify-center gap-2 text-xs font-semibold text-emerald-900">
-                      <CheckIcon className="h-4 w-4 text-emerald-700" />
-                      <span>Izabran fajl: {selectedFile.name}</span>
-                      <span className="text-xs text-ink-3">
-                        ({Math.round(selectedFile.size / 1024)} KB)
-                      </span>
-                    </div>
-                  ) : (
-                    <div className="space-y-1">
-                      <div className="mx-auto flex h-8 w-8 items-center justify-center rounded-full bg-surface-2 text-ink-3">
-                        <UploadIcon className="h-4 w-4" />
-                      </div>
-                      <p className="text-xs font-semibold text-ink">
-                        Kliknite ovde za izbor fajla ili ga prevucite
-                      </p>
-                      <p className="text-2xs text-ink-3">
-                        Podržano: PDF, JPG, PNG do 25 MB
-                      </p>
-                    </div>
-                  )}
-                </div>
-              </div>
+            <Button variant="dark" onClick={handleDownloadBoth} className="w-full sm:w-auto">
+              Preuzmi popunjen ugovor
+            </Button>
+            <div className="flex flex-wrap gap-x-5 gap-y-2">
+              <a href={isSelf ? "/documents/SELF_UGOVOR_2027.pdf" : "/documents/FULL_Lifeguard_UGOVOR_2027.pdf"} download className={linkCls}>
+                Ugovor (prazan)
+              </a>
+              <a href="/documents/Izjava_o_odgovornosti_2027.pdf" download className={linkCls}>
+                Izjava o odgovornosti
+              </a>
+              <a href="/documents/Saglasnost_Vazne_informacije_SWT_USA_2027.pdf" download className={linkCls}>
+                Saglasnost i važne informacije
+              </a>
             </div>
           </div>
+        </section>
 
-          {error && (
-            <div className="rounded-xl bg-red-50 p-3 text-xs font-semibold text-red-900">
-              {error}
+        <section className="flex gap-4">
+          <Num n={3} />
+          <div className="min-w-0 flex-1 space-y-3">
+            <div>
+              <h3 className="text-[15px] font-semibold text-ink">Uslikaj i okači</h3>
+              <p className="mt-0.5 text-[13px] text-ink-3">PDF ili slika, potpis mora da se vidi.</p>
             </div>
-          )}
-
-          {/* Action buttons */}
-          <div className="flex flex-col sm:flex-row items-center justify-between gap-3 border-t border-line pt-4">
-            <button
-              type="button"
-              onClick={handleQuickDemoSubmit}
-              disabled={isUploading}
-              title="Automatski generiše i okači primerak potpisanog ugovora radi trenutnog testiranja"
-              className="text-xs font-semibold text-ink-3 underline hover:text-ink transition-colors"
+            <div
+              onDragOver={(e) => {
+                e.preventDefault();
+                setDragOver(true);
+              }}
+              onDragLeave={() => setDragOver(false)}
+              onDrop={handleDrop}
+              onClick={() => fileInputRef.current?.click()}
+              role="button"
+              tabIndex={0}
+              onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && fileInputRef.current?.click()}
+              className={cx(
+                "flex cursor-pointer items-center gap-3 rounded-xl border border-dashed px-4 py-4 transition-colors",
+                dragOver ? "border-ink bg-surface" : selectedFile ? "border-line-strong bg-white" : "border-line-strong hover:border-ink/40 hover:bg-surface"
+              )}
             >
-              Ubaci demo primerak (test bez štampača)
-            </button>
-
-            <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
-              <button
-                type="button"
-                onClick={onClose}
-                className="rounded-full border border-line-strong bg-white px-5 py-2.5 text-xs font-semibold text-ink-2 hover:bg-surface-2"
-              >
-                Zatvori
-              </button>
-
-              <button
-                type="button"
-                onClick={handleSubmit}
-                disabled={isUploading || !selectedFile}
-                className="bg-brand rounded-full px-6 py-2.5 text-[13px] font-semibold text-ink disabled:opacity-50 flex items-center gap-2 transition-colors hover:bg-brand-strong"
-              >
-                {isUploading ? (
-                  <>
-                    <span className="h-3 w-3 rounded-full border-2 border-ink border-t-transparent animate-spin" />
-                    Kačenje u toku...
-                  </>
-                ) : (
-                  "Okači potpisani ugovor ✓"
-                )}
-              </button>
+              <input ref={fileInputRef} type="file" accept=".pdf,image/png,image/jpeg,image/jpg" onChange={handleFileChange} className="hidden" />
+              <span className={cx("flex h-10 w-10 shrink-0 items-center justify-center rounded-full", selectedFile ? "bg-ink text-white" : "bg-surface-2 text-ink-3")}>
+                {selectedFile ? <CheckIcon className="h-4 w-4" /> : <UploadIcon className="h-4 w-4" />}
+              </span>
+              <span className="min-w-0">
+                <span className="block truncate text-sm font-medium text-ink">{selectedFile ? selectedFile.name : "Izaberi fajl"}</span>
+                <span className="block text-[13px] text-ink-3">
+                  {selectedFile ? `${Math.round(selectedFile.size / 1024)} KB · dodirni za drugi` : "ili ga prevuci ovde · do 25 MB"}
+                </span>
+              </span>
             </div>
+            {error && <p className="text-[13px] text-red-700">{error}</p>}
           </div>
-        </div>
+        </section>
       </div>
-    </div>
+    </Sheet>
   );
 }
