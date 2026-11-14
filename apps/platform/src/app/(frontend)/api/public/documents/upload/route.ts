@@ -2,7 +2,17 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { createWorker } from 'tesseract.js'
 import sharp from 'sharp'
+import config from '@payload-config'
+import { getPayload } from 'payload'
+
+import { resolvePortalActor } from '@/modules/portal-sync/access.ts'
+import {
+  MAX_PORTAL_DOCUMENT_BYTES,
+  readPortalDocument,
+  storePortalDocument,
+} from '@/modules/portal-sync/portalDb.ts'
 import { getPortalState, savePortalCandidate } from '@/modules/portal-sync/localStore.ts'
+import { isSameOriginRequest } from '@/modules/security/sameOrigin.ts'
 
 function resolveTesseractWorkerOptions(): { workerPath?: string } {
   const candidates = [
@@ -25,11 +35,38 @@ function json(body: unknown, status = 200) {
 }
 
 export async function GET(request: Request) {
+  const actor = await resolvePortalActor()
+  if (actor.kind === 'anonymous') return new Response('Prijavite se ponovo.', { status: 401 })
   try {
     const url = new URL(request.url)
+    const docId = url.searchParams.get('doc')
+    if (docId) {
+      const payload = await getPayload({ config })
+      const doc = await readPortalDocument(payload, docId)
+      if (!doc || (actor.kind === 'candidate' && doc.email !== actor.email)) {
+        return new Response('Dokument nije pronađen.', { status: 404 })
+      }
+      return new Response(new Uint8Array(doc.bytes), {
+        headers: {
+          'Cache-Control': 'private, no-store',
+          'Content-Disposition': `inline; filename="${encodeURIComponent(doc.fileName)}"`,
+          'Content-Type': doc.mimeType,
+          'X-Content-Type-Options': 'nosniff',
+        },
+      })
+    }
     const preview = url.searchParams.get('preview') || url.searchParams.get('name')
     if (preview) {
       const safeName = path.basename(preview)
+      // Kandidat sme da otvori samo sopstvene fajlove (ime fajla sadrži njegov ID).
+      if (actor.kind === 'candidate') {
+        const state = await getPortalState()
+        const own = state.candidates.find((c) => String(c.email || '').toLowerCase() === actor.email)
+        const ownId = own ? String(own.id).replace(/[^a-zA-Z0-9_-]/g, '_') : null
+        if (!ownId || !safeName.includes(`-${ownId}-`)) {
+          return new Response('Dokument nije pronađen.', { status: 404 })
+        }
+      }
       const filePath = path.resolve(process.cwd(), '.data', 'uploads', safeName)
       if (fs.existsSync(filePath)) {
         const fileBytes = fs.readFileSync(filePath)
@@ -57,11 +94,18 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
+  if (!isSameOriginRequest(request)) return json({ message: 'Zahtev nije dozvoljen.', success: false }, 403)
+  const actor = await resolvePortalActor()
+  if (actor.kind === 'anonymous') return json({ message: 'Prijavite se ponovo.', success: false }, 401)
   try {
     const formData = await request.formData()
     const file = formData.get('file')
     const docType = String(formData.get('type') || 'cv')
-    const email = String(formData.get('email') || '').trim().toLowerCase()
+    // Kandidat uvek otprema za sebe; agencija bira kandidata emailom.
+    const email =
+      actor.kind === 'candidate'
+        ? actor.email
+        : String(formData.get('email') || '').trim().toLowerCase()
 
     if (!(file instanceof File) || file.size === 0) {
       return json({ message: 'Nije priložen validan fajl.', success: false }, 400)
@@ -72,30 +116,46 @@ export async function POST(request: Request) {
     }
 
     const state = await getPortalState()
-    const candidate = state.candidates.find((c) => c.email.toLowerCase() === email) || state.candidates[0]
+    const candidate = state.candidates.find((c) => String(c.email || '').toLowerCase() === email)
+    if (!candidate) return json({ message: 'Kandidat nije pronađen.', success: false }, 404)
 
-    // Save actual file bytes to .data/uploads
-    const arrayBuf = await file.arrayBuffer()
-    const rawBytes = Buffer.from(arrayBuf)
-    const uploadsDir = path.resolve(process.cwd(), '.data', 'uploads')
-    if (!fs.existsSync(uploadsDir)) {
-      fs.mkdirSync(uploadsDir, { recursive: true })
+    // Fajl se čuva šifrovano u bazi (portal-documents), ne na disku kontejnera.
+    const rawBytes = Buffer.from(await file.arrayBuffer())
+    if (rawBytes.length > MAX_PORTAL_DOCUMENT_BYTES) {
+      return json({ message: 'Fajl je prevelik (maksimalno 10 MB).', success: false }, 413)
     }
-    const safeId = candidate ? String(candidate.id).replace(/[^a-zA-Z0-9_-]/g, '_') : 'cand'
-    const ext = path.extname(file.name) || (file.type.includes('pdf') ? '.pdf' : '.jpg')
-    const targetFileName = `${docType}-${safeId}-${Date.now()}${ext}`
-    const targetPath = path.join(uploadsDir, targetFileName)
+    const ext = path.extname(file.name).toLowerCase()
+    const mime = file.type || (ext === '.pdf' ? 'application/pdf' : 'image/jpeg')
+    const linkField =
+      docType === 'facultyCert'
+        ? 'facultyCertUrl'
+        : docType === 'signedContract' || docType === 'contract'
+          ? 'signedContractUrl'
+          : docType === 'policeCert'
+            ? 'policeCertificateUrl'
+            : docType === 'passport'
+              ? 'passportScanUrl'
+              : 'cvUrl'
+    const payload = await getPayload({ config })
+    let fileUrl: string
     try {
-      fs.writeFileSync(targetPath, rawBytes)
-    } catch (e) {
-      console.warn('Could not write uploaded file to disk:', e)
+      const stored = await storePortalDocument(payload, {
+        bytes: rawBytes,
+        email,
+        field: linkField,
+        fileName: file.name,
+        mimeType: mime,
+        recordKey: String(candidate.id),
+      })
+      fileUrl = stored.url
+    } catch (error) {
+      console.error('Encrypted document storage failed.', error instanceof Error ? error.name : 'UNKNOWN_ERROR')
+      return json({ message: 'Dokument trenutno ne može da se sačuva. Pokušaj ponovo.', success: false }, 503)
     }
-
-    const mime = file.type || (ext.toLowerCase() === '.pdf' ? 'application/pdf' : 'image/jpeg')
+    // Pregled odmah posle otpremanja ide samo u odgovor, ne u dosije.
     const previewDataUrl = rawBytes.length < 5 * 1024 * 1024
       ? `data:${mime};base64,${rawBytes.toString('base64')}`
       : undefined
-    const fileUrl = `/api/public/documents/upload?preview=${targetFileName}`
 
     let ocrText = ''
     let ocrConfidence = 0
@@ -132,7 +192,7 @@ export async function POST(request: Request) {
           facultyCertAiTranslation: true,
           facultyCertFileName: file.name,
           facultyCertUrl: fileUrl,
-          facultyCertDataUrl: previewDataUrl,
+          facultyCertDataUrl: undefined,
           facultyCertUploadedAt: new Date().toISOString(),
         })
       }
@@ -159,7 +219,7 @@ export async function POST(request: Request) {
           signedContractFileName: file.name,
           signedContractUploadedAt: new Date().toISOString(),
           signedContractUrl: fileUrl,
-          signedContractDataUrl: previewDataUrl,
+          signedContractDataUrl: undefined,
         })
       }
 
@@ -178,7 +238,7 @@ export async function POST(request: Request) {
           ...candidate,
           policeCertificateFileName: file.name,
           policeCertificateUrl: fileUrl,
-          policeCertificateDataUrl: previewDataUrl,
+          policeCertificateDataUrl: undefined,
           policeCertificateUploaded: true,
           policeCertificateTranslated: true,
           policeCertificateUploadedAt: new Date().toISOString(),
@@ -200,8 +260,8 @@ export async function POST(request: Request) {
           ...candidate,
           passportScanFileName: file.name,
           passportScanUrl: fileUrl,
-          passportScanDataUrl: previewDataUrl,
-          passportImage: previewDataUrl,
+          passportScanDataUrl: undefined,
+          passportImage: undefined,
         })
       }
 
@@ -220,7 +280,7 @@ export async function POST(request: Request) {
         ...candidate,
         cvFileName: file.name,
         cvUrl: fileUrl,
-        cvDataUrl: previewDataUrl,
+        cvDataUrl: undefined,
         cvUploadedAt: new Date().toISOString(),
       })
     }

@@ -4,6 +4,9 @@ import net from 'node:net'
 import path from 'node:path'
 import { getPayload, type Payload } from 'payload'
 
+import { generateInvitationCode } from './invitationCode.ts'
+import { deletePortalRecord, readPortalDb, writePortalDb } from './portalDb.ts'
+
 export interface PortalGuarantor {
   name: string
   idCardNumber: string
@@ -203,50 +206,82 @@ export interface PortalStoreData {
   promotions?: PortalPromotion[]
 }
 
-const STORE_FILE = path.resolve(process.cwd(), '.data', 'portal-store.json')
+// Stari demo fajl. Čita se samo jednom, za uvoz u bazu; u njega se više ne piše.
+const LEGACY_STORE_FILE = path.resolve(process.cwd(), '.data', 'portal-store.json')
 
-export function readFileStore(): PortalStoreData {
+const EMPTY_STORE = (): PortalStoreData => ({
+  announcements: [],
+  candidates: [],
+  faqItems: [],
+  invitations: [],
+  promotions: [],
+  siteContent: {},
+})
+
+function readLegacyFile(): PortalStoreData | null {
   try {
-    if (fs.existsSync(STORE_FILE)) {
-      const raw = fs.readFileSync(STORE_FILE, 'utf8')
-      const parsed = JSON.parse(raw) as Partial<PortalStoreData>
-      if (Array.isArray(parsed.invitations) && Array.isArray(parsed.candidates)) {
-        return {
-          announcements: parsed.announcements || [],
-          candidates: parsed.candidates,
-          faqItems: parsed.faqItems || [],
-          invitations: parsed.invitations,
-          promotions: parsed.promotions || [],
-          siteContent: parsed.siteContent || {},
-        }
-      }
+    if (!fs.existsSync(LEGACY_STORE_FILE)) return null
+    const parsed = JSON.parse(fs.readFileSync(LEGACY_STORE_FILE, 'utf8')) as Partial<PortalStoreData>
+    if (!Array.isArray(parsed.invitations) || !Array.isArray(parsed.candidates)) return null
+    return {
+      announcements: parsed.announcements || [],
+      candidates: parsed.candidates,
+      faqItems: parsed.faqItems || [],
+      invitations: parsed.invitations,
+      promotions: parsed.promotions || [],
+      siteContent: parsed.siteContent || {},
     }
   } catch {
-    // Fallback to defaults
+    return null
   }
-
-  const initial: PortalStoreData = {
-    announcements: [],
-    candidates: [],
-    faqItems: [],
-    invitations: [],
-    promotions: [],
-    siteContent: {},
-  }
-  writeFileStore(initial)
-  return initial
 }
 
-export function writeFileStore(data: PortalStoreData) {
-  try {
-    const dir = path.dirname(STORE_FILE)
-    if (!fs.existsSync(dir)) {
-      fs.mkdirSync(dir, { recursive: true })
-    }
-    fs.writeFileSync(STORE_FILE, JSON.stringify(data, null, 2), 'utf8')
-  } catch {
-    // Ignore file write errors in read-only environments
+/**
+ * Stanje portala iz Postgresa. Pri prvom pokretanju (baza prazna) jednom uvozi stari JSON fajl
+ * ako postoji. Bez baze (samo lokalni razvoj bez Postgresa) vraća prazno stanje ili stari fajl.
+ */
+async function readStore(): Promise<PortalStoreData> {
+  const payload = await getPayloadIfAvailable()
+  if (!payload) return readLegacyFile() || EMPTY_STORE()
+
+  const snapshot = await readPortalDb(payload)
+  if (!snapshot.settings) {
+    const legacy = readLegacyFile()
+    const initial = legacy || EMPTY_STORE()
+    await writeStore(initial, { legacyImportedAt: new Date().toISOString() })
+    return readStore()
   }
+  const settings = snapshot.settings
+  return {
+    announcements: (settings.announcements || []) as PortalAnnouncement[],
+    candidates: snapshot.candidates as unknown as PortalCandidate[],
+    faqItems: (settings.faqItems || []) as PortalFaqItem[],
+    invitations: (settings.invitations || []) as PortalInvitation[],
+    promotions: (settings.promotions || []) as PortalPromotion[],
+    siteContent: (settings.siteContent || {}) as PortalStoreData['siteContent'],
+  }
+}
+
+async function writeStore(data: PortalStoreData, options: { legacyImportedAt?: string } = {}) {
+  const payload = await getPayloadIfAvailable()
+  if (!payload) {
+    console.error('Portal state could not be saved: database is not reachable.')
+    return
+  }
+  await writePortalDb(
+    payload,
+    {
+      candidates: data.candidates as unknown as Record<string, unknown>[],
+      settings: {
+        announcements: data.announcements || [],
+        faqItems: data.faqItems || [],
+        invitations: data.invitations || [],
+        promotions: data.promotions || [],
+        siteContent: data.siteContent || {},
+      },
+    },
+    options,
+  )
 }
 
 function checkPostgresReachable(timeoutMs = 150): Promise<boolean> {
@@ -291,7 +326,7 @@ export async function getPayloadIfAvailable(): Promise<Payload | null> {
 }
 
 export async function getPortalState(): Promise<PortalStoreData> {
-  const fileData = readFileStore()
+  const fileData = await readStore()
   const payload = await getPayloadIfAvailable()
 
   if (!payload) {
@@ -460,7 +495,7 @@ export async function getPortalState(): Promise<PortalStoreData> {
     }
 
     const merged = { candidates, invitations }
-    writeFileStore(merged)
+    await writeStore(merged)
     return merged
   } catch {
     return fileData
@@ -533,7 +568,7 @@ export async function verifyPortalInvitation(email: string, code: string) {
 
   if ((inv.email || '').toLowerCase() !== normEmail) {
     return {
-      message: `Verifikacioni kod ${normCode} je vezan isključivo za email: ${inv.email}. Ne možete se registrovati sa drugom email adresom.`,
+      message: 'Kod i email adresa se ne poklapaju. Upiši email na koji ti je stigla pozivnica.',
       status: 400,
       valid: false,
     }
@@ -549,10 +584,10 @@ export async function verifyPortalInvitation(email: string, code: string) {
     if (!registeredCand) {
       inv.status = 'pending';
       delete inv.registeredAt;
-      writeFileStore(state);
+      await writeStore(state);
     } else {
       return {
-        message: `Verifikacioni kod za ${inv.email} je već iskorišćen za registraciju. Molimo prijavite se na stranici za prijavu.`,
+        message: 'Ovaj kod je već iskorišćen. Prijavi se svojim emailom i lozinkom.',
         status: 400,
         valid: false,
       };
@@ -577,8 +612,7 @@ export async function createPortalInvitation(input: {
   discountNote?: string
 }) {
   const email = String(input.email || '').trim().toLowerCase()
-  const randomDigits = Math.floor(1000 + Math.random() * 9000)
-  const code = String(input.code || `WT-${randomDigits}`).trim().toUpperCase()
+  const code = String(input.code || generateInvitationCode()).trim().toUpperCase()
   const basePrice = Number(input.basePrice) || 1850
   const discount = Math.max(0, Number(input.discount) || 0)
   const finalPrice = Math.max(0, basePrice - discount)
@@ -597,14 +631,14 @@ export async function createPortalInvitation(input: {
     status: 'pending',
   }
 
-  const fileData = readFileStore()
+  const fileData = await readStore()
   const existingIdx = fileData.invitations.findIndex((i) => i.code.toUpperCase() === code)
   if (existingIdx >= 0) {
     fileData.invitations[existingIdx] = newInv
   } else {
     fileData.invitations.unshift(newInv)
   }
-  writeFileStore(fileData)
+  await writeStore(fileData)
 
   const payload = await getPayloadIfAvailable()
   if (payload) {
@@ -635,7 +669,7 @@ export async function createPortalInvitation(input: {
 }
 
 export async function savePortalCandidate(candidateInput: Partial<PortalCandidate> & { code?: string }) {
-  const fileData = readFileStore()
+  const fileData = await readStore()
   const normEmail = String(candidateInput.email || '').trim().toLowerCase()
 
   const existingIdx = fileData.candidates.findIndex(
@@ -851,7 +885,7 @@ export async function savePortalCandidate(candidateInput: Partial<PortalCandidat
     })
   }
 
-  writeFileStore(fileData)
+  await writeStore(fileData)
 
   const payload = await getPayloadIfAvailable()
   if (payload && mergedCandidate.email && mergedCandidate.firstName && mergedCandidate.lastName) {
@@ -949,7 +983,7 @@ export async function savePortalCandidate(candidateInput: Partial<PortalCandidat
 }
 
 export async function deletePortalCandidate(idOrEmail: string | number) {
-  const fileData = readFileStore()
+  const fileData = await readStore()
   const key = String(idOrEmail).trim().toLowerCase()
   const isKeyEmail = key.includes('@')
   const target = fileData.candidates.find(
@@ -959,10 +993,14 @@ export async function deletePortalCandidate(idOrEmail: string | number) {
   fileData.candidates = fileData.candidates.filter(
     (c) => String(c.id).toLowerCase() !== key && (!isKeyEmail || c.email.toLowerCase() !== key),
   )
-  writeFileStore(fileData)
+  await writeStore(fileData)
 
   const payload = await getPayloadIfAvailable()
-  if (payload && target && isKeyEmail) {
+  if (payload && target) {
+    await deletePortalRecord(payload, target.id)
+    if (target.email) await deletePortalRecord(payload, target.email)
+  }
+  if (payload && target) {
     try {
       const existing = await payload.find({
         collection: 'candidate-applications',
@@ -988,7 +1026,7 @@ export async function deletePortalCandidate(idOrEmail: string | number) {
 export async function savePortalAnnouncement(
   item: Omit<PortalAnnouncement, 'id' | 'date'> & { id?: string | number; date?: string },
 ) {
-  const fileData = readFileStore()
+  const fileData = await readStore()
   const announcements = fileData.announcements || []
   const newId = item.id || Date.now()
   const fullItem: PortalAnnouncement = {
@@ -1012,34 +1050,34 @@ export async function savePortalAnnouncement(
   })
 
   fileData.announcements = [fullItem, ...announcements]
-  writeFileStore(fileData)
+  await writeStore(fileData)
   return fileData.announcements
 }
 
 export async function savePortalSiteContent(itemKey: string, title: string, content: string) {
-  const fileData = readFileStore()
+  const fileData = await readStore()
   fileData.siteContent = fileData.siteContent || {}
   fileData.siteContent[itemKey] = { content, title }
-  writeFileStore(fileData)
+  await writeStore(fileData)
   return fileData.siteContent
 }
 
 export async function savePortalFaq(items: PortalFaqItem[]) {
-  const fileData = readFileStore()
+  const fileData = await readStore()
   fileData.faqItems = items
-  writeFileStore(fileData)
+  await writeStore(fileData)
   return fileData.faqItems
 }
 
 export async function savePortalPromotions(promotions: PortalPromotion[]) {
-  const fileData = readFileStore()
+  const fileData = await readStore()
   fileData.promotions = promotions
-  writeFileStore(fileData)
+  await writeStore(fileData)
   return fileData.promotions
 }
 
 export async function savePortalCandidateDs160(candidateIdOrEmail: string | number, ds160: Record<string, string>) {
-  const fileData = readFileStore()
+  const fileData = await readStore()
   const key = String(candidateIdOrEmail).trim().toLowerCase()
   const target = fileData.candidates.find(
     (c) => String(c.id).toLowerCase() === key || c.email.toLowerCase() === key,
@@ -1062,25 +1100,13 @@ export async function savePortalCandidateDs160(candidateIdOrEmail: string | numb
     if (ds160.gender) target.gender = ds160.gender
     if (ds160.homeAddress) target.address = ds160.homeAddress
     if (ds160.university) target.faculty = ds160.university
-    writeFileStore(fileData)
+    await writeStore(fileData)
   }
   return target || null
 }
 
-export async function clearPortalStore(): Promise<PortalStoreData> {
-  const clean: PortalStoreData = {
-    announcements: [],
-    candidates: [],
-    faqItems: [],
-    invitations: [],
-    siteContent: {},
-  }
-  writeFileStore(clean)
-  return clean
-}
-
 export async function signPortalCandidateContract(candidateIdOrEmail: string | number, reference?: string) {
-  const fileData = readFileStore()
+  const fileData = await readStore()
   const key = String(candidateIdOrEmail).trim().toLowerCase()
   const target = fileData.candidates.find(
     (c) => String(c.id).toLowerCase() === key || c.email.toLowerCase() === key,
@@ -1093,13 +1119,13 @@ export async function signPortalCandidateContract(candidateIdOrEmail: string | n
     if (!target.contractDownloadedAt) {
       target.contractDownloadedAt = target.contractSignedAt
     }
-    writeFileStore(fileData)
+    await writeStore(fileData)
   }
   return target || null
 }
 
 export async function markPortalCandidateContractDownloaded(candidateIdOrEmail: string | number) {
-  const fileData = readFileStore()
+  const fileData = await readStore()
   const key = String(candidateIdOrEmail).trim().toLowerCase()
   const target = fileData.candidates.find(
     (c) => String(c.id).toLowerCase() === key || c.email.toLowerCase() === key,
@@ -1109,7 +1135,7 @@ export async function markPortalCandidateContractDownloaded(candidateIdOrEmail: 
     if (!target.contractDownloadedAt) {
       target.contractDownloadedAt = new Date().toISOString()
     }
-    writeFileStore(fileData)
+    await writeStore(fileData)
   }
   return target || null
 }
@@ -1119,7 +1145,7 @@ export async function uploadPortalSignedContract(
   fileName: string,
   fileUrl?: string,
 ) {
-  const fileData = readFileStore()
+  const fileData = await readStore()
   const key = String(candidateIdOrEmail).trim().toLowerCase()
   const target = fileData.candidates.find(
     (c) => String(c.id).toLowerCase() === key || c.email.toLowerCase() === key,
@@ -1132,7 +1158,7 @@ export async function uploadPortalSignedContract(
     target.contractSignedAt = target.signedContractUploadedAt
     target.contractSignedReference = `AA-POTPIS-${String(target.id).replace(/[^0-9]/g, '').slice(-4) || '1042'}-${Date.now().toString(36).toUpperCase()}`
     target.contractDownloaded = true
-    writeFileStore(fileData)
+    await writeStore(fileData)
   }
   return target || null
 }
@@ -1144,7 +1170,7 @@ export async function resetPortalInvitation(code: string) {
   if (inv) {
     inv.status = 'pending';
     delete inv.registeredAt;
-    writeFileStore(state);
+    await writeStore(state);
     const payload = await getPayloadIfAvailable();
     if (payload) {
       try {

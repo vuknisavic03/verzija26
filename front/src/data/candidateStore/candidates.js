@@ -400,6 +400,19 @@ function applyReactiveWorkflowTransitions(cand, explicitStatusProvided = false) 
   return c;
 }
 
+/**
+ * Polja sa fajlom (data: URL) i linkom koji server vrati kad fajl sačuva šifrovano. Posle potvrde
+ * servera lokalni keš briše data: URL, pa se svaki fajl šalje samo jednom.
+ */
+const FILE_FIELDS = [
+  ["cvDataUrl", "cvUrl"],
+  ["facultyCertDataUrl", "facultyCertUrl"],
+  ["policeCertificateDataUrl", "policeCertificateUrl"],
+  ["signedContractDataUrl", "signedContractUrl"],
+  ["passportScanDataUrl", "passportScanUrl"],
+  ["passportImage", "passportScanUrl"],
+];
+
 export function saveCandidate(candidate, options = {}) {
   const list = getCandidates();
   const candidateEmail = candidate.email ? candidate.email.toLowerCase().trim() : "";
@@ -619,7 +632,18 @@ export function saveCandidate(candidate, options = {}) {
         action: "saveCandidate",
         payload: merged,
       }),
-    }).catch(() => {});
+    })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        // Server je fajlove sačuvao šifrovano i vratio linkove — lokalni keš više ne drži fajlove.
+        if (!data?.candidate) return;
+        const fromServer = { ...data.candidate };
+        for (const [dataKey, linkKey] of FILE_FIELDS) {
+          if (String(fromServer[linkKey] || "").includes("documents/upload?doc=")) fromServer[dataKey] = undefined;
+        }
+        saveCandidate(fromServer, { skipRemoteSync: true });
+      })
+      .catch(() => {});
 
     // Ako je stari ID bio preapp- i promenio se, očisti stari ID na backendu
     if (baseCandidate && baseCandidate.id !== targetId && String(baseCandidate.id).startsWith("preapp-")) {

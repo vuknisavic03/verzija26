@@ -117,6 +117,8 @@ export interface Config {
     'outbox-events': OutboxEvent;
     'message-deliveries': MessageDelivery;
     'request-rate-limits': RequestRateLimit;
+    'portal-records': PortalRecord;
+    'portal-documents': PortalDocument;
     'payload-kv': PayloadKv;
     'payload-jobs': PayloadJob;
     'payload-locked-documents': PayloadLockedDocument;
@@ -174,6 +176,8 @@ export interface Config {
     'outbox-events': OutboxEventsSelect<false> | OutboxEventsSelect<true>;
     'message-deliveries': MessageDeliveriesSelect<false> | MessageDeliveriesSelect<true>;
     'request-rate-limits': RequestRateLimitsSelect<false> | RequestRateLimitsSelect<true>;
+    'portal-records': PortalRecordsSelect<false> | PortalRecordsSelect<true>;
+    'portal-documents': PortalDocumentsSelect<false> | PortalDocumentsSelect<true>;
     'payload-kv': PayloadKvSelect<false> | PayloadKvSelect<true>;
     'payload-jobs': PayloadJobsSelect<false> | PayloadJobsSelect<true>;
     'payload-locked-documents': PayloadLockedDocumentsSelect<false> | PayloadLockedDocumentsSelect<true>;
@@ -2011,6 +2015,49 @@ export interface RequestRateLimit {
   updatedAt: string;
 }
 /**
+ * Stanje kandidatskog portala. Menja se samo kroz portal i admin panel.
+ *
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "portal-records".
+ */
+export interface PortalRecord {
+  id: number;
+  key: string;
+  kind: 'candidate' | 'settings';
+  email?: string | null;
+  data:
+    | {
+        [k: string]: unknown;
+      }
+    | unknown[]
+    | string
+    | number
+    | boolean
+    | null;
+  updatedAt: string;
+  createdAt: string;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "portal-documents".
+ */
+export interface PortalDocument {
+  id: number;
+  recordKey: string;
+  email: string;
+  field: string;
+  fileName: string;
+  mimeType: string;
+  sizeBytes: number;
+  sha256: string;
+  ciphertext: string;
+  iv: string;
+  authTag: string;
+  keyId: string;
+  updatedAt: string;
+  createdAt: string;
+}
+/**
  * This interface was referenced by `Config`'s JSON-Schema
  * via the `definition` "payload-kv".
  */
@@ -2317,6 +2364,14 @@ export interface PayloadLockedDocument {
     | ({
         relationTo: 'message-deliveries';
         value: number | MessageDelivery;
+      } | null)
+    | ({
+        relationTo: 'portal-records';
+        value: number | PortalRecord;
+      } | null)
+    | ({
+        relationTo: 'portal-documents';
+        value: number | PortalDocument;
       } | null);
   globalSlug?: string | null;
   user:
@@ -3729,6 +3784,37 @@ export interface RequestRateLimitsSelect<T extends boolean = true> {
   windowStartedAt?: T;
   expiresAt?: T;
   updatedAt?: T;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "portal-records_select".
+ */
+export interface PortalRecordsSelect<T extends boolean = true> {
+  key?: T;
+  kind?: T;
+  email?: T;
+  data?: T;
+  updatedAt?: T;
+  createdAt?: T;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "portal-documents_select".
+ */
+export interface PortalDocumentsSelect<T extends boolean = true> {
+  recordKey?: T;
+  email?: T;
+  field?: T;
+  fileName?: T;
+  mimeType?: T;
+  sizeBytes?: T;
+  sha256?: T;
+  ciphertext?: T;
+  iv?: T;
+  authTag?: T;
+  keyId?: T;
+  updatedAt?: T;
+  createdAt?: T;
 }
 /**
  * This interface was referenced by `Config`'s JSON-Schema

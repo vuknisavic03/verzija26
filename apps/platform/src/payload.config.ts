@@ -53,11 +53,14 @@ import { CandidateDiscounts } from './collections/CandidateDiscounts.ts'
 import { CandidateGuarantors } from './collections/CandidateGuarantors.ts'
 import { VisaQuestionnaires } from './collections/VisaQuestionnaires.ts'
 import { VisaPaymentOrders } from './collections/VisaPaymentOrders.ts'
+import { PortalDocuments } from './collections/PortalDocuments.ts'
+import { PortalRecords } from './collections/PortalRecords.ts'
 import { readPlatformEnvironment } from './config/environment.ts'
 import { migrations } from './migrations/index.ts'
 import { sendCandidateCommunicationTask } from './modules/candidate-communications/sendCandidateCommunicationTask.ts'
 import { createPlatformEmailAdapter } from './modules/candidate-communications/emailProvider.ts'
 import { sendEmbassyAppointmentReminderTask } from './modules/embassy-appointments/sendEmbassyAppointmentReminderTask.ts'
+import { trustedSiteOrigins } from './modules/security/sameOrigin.ts'
 
 const filename = fileURLToPath(import.meta.url)
 const directory = path.dirname(filename)
@@ -124,6 +127,8 @@ export default buildConfig({
     OutboxEvents,
     MessageDeliveries,
     RequestRateLimits,
+    PortalRecords,
+    PortalDocuments,
   ],
   db: postgresAdapter({
     pool: {
@@ -146,6 +151,8 @@ export default buildConfig({
     tasks: [sendCandidateCommunicationTask, sendEmbassyAppointmentReminderTask],
   },
   secret: environment.payloadSecret,
+  // Kolačić sesije važi i za zahteve sa javnog domena sajta koji prosleđuje /api/* (PUBLIC_SITE_ORIGINS).
+  csrf: [environment.serverUrl, ...trustedSiteOrigins()],
   serverURL: environment.serverUrl,
   typescript: {
     outputFile: path.resolve(directory, 'payload-types.ts'),
