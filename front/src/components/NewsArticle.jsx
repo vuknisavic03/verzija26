@@ -4,6 +4,7 @@ import { useTranslation } from "../i18n/LanguageContext";
 import NewsImage from "./NewsImage";
 import { getNews } from "../data/newsStore";
 import CtaBand from "./CtaBand";
+import { renderInline, blockOf } from "./richText";
 import { Button, PlaneIcon } from "./ui";
 
 // „Nazad na vesti" po jeziku (kratko, drži se ovde).
@@ -87,20 +88,23 @@ export default function NewsArticle({ slug, items: itemsProp, onNavigate = () =>
       </div>
 
       <div className="mx-auto mt-14 max-w-2xl space-y-5 px-5 text-[18px] leading-[1.7] text-ink sm:px-8">
-        {paragraphs.map((p, i) =>
-          p.startsWith("## ") ? (
-            <h2 key={i} className="font-display pt-6 text-[1.6rem] font-extrabold leading-tight text-ink">{p.slice(3)}</h2>
-          ) : p.startsWith("• ") ? (
-            <p key={i} className="flex gap-4">
-              <span className="mt-[12px] h-2 w-2 shrink-0 bg-brand ring-2 ring-ink" aria-hidden="true" />
-              <span>{p.slice(2)}</span>
-            </p>
-          ) : i === 0 ? (
-            <p key={i} className="text-[21px] leading-[1.55] text-ink">{p}</p>
+        {paragraphs.map((p, i) => {
+          const [kind, text] = blockOf(p);
+          if (kind === "h1") return <h2 key={i} className="font-display pt-8 text-[2rem] font-extrabold leading-tight text-ink">{renderInline(text)}</h2>;
+          if (kind === "h2") return <h3 key={i} className="font-display pt-6 text-[1.6rem] font-extrabold leading-tight text-ink">{renderInline(text)}</h3>;
+          if (kind === "li")
+            return (
+              <p key={i} className="flex gap-4">
+                <span className="mt-[12px] h-2 w-2 shrink-0 bg-brand ring-2 ring-ink" aria-hidden="true" />
+                <span>{renderInline(text)}</span>
+              </p>
+            );
+          return i === 0 ? (
+            <p key={i} className="text-[21px] leading-[1.55] text-ink">{renderInline(text)}</p>
           ) : (
-            <p key={i} className="text-ink/85">{p}</p>
-          )
-        )}
+            <p key={i} className="text-ink/85">{renderInline(text)}</p>
+          );
+        })}
       </div>
 
       {related.length > 0 && (
