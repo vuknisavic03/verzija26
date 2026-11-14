@@ -1217,7 +1217,8 @@ export default function Dashboard({
       {/* MODAL: PROFIL BUILDER (CV, ISKUSTVO, DOSTUPNOST) */}
       {showProfileBuilderModal && (
         <ProfileBuilderModal
-          isOpen={showProfileBuilderModal}
+          isOpen={Boolean(showProfileBuilderModal)}
+          initialTab={typeof showProfileBuilderModal === "string" ? showProfileBuilderModal : undefined}
           onClose={() => setShowProfileBuilderModal(false)}
           candidate={candidate}
           onSave={(profileData) => {

@@ -1,15 +1,16 @@
 import { useState } from "react";
 import { calculateProfileScore } from "../data/candidateStore";
 import { Button, cx } from "./ui";
+import { VideoGuide } from "./dashboard/modals/VideoInstructionsModal";
 import Sheet, { SheetSteps, SheetSection, SheetFooter, FormField, Chip, Hint, fieldInputCls as inp } from "./dashboard/Sheet";
 
-export default function ProfileBuilderModal({ candidate, isOpen = true, onClose, onSave }) {
+export default function ProfileBuilderModal({ candidate, isOpen = true, onClose, onSave, initialTab }) {
   if (!isOpen || !candidate) return null;
-  return <ProfileBuilder candidate={candidate} onClose={onClose} onSave={onSave} />;
+  return <ProfileBuilder candidate={candidate} onClose={onClose} onSave={onSave} initialTab={initialTab} />;
 }
 
-function ProfileBuilder({ candidate, onClose, onSave }) {
-  const [activeTab, setActiveTab] = useState("personal");
+function ProfileBuilder({ candidate, onClose, onSave, initialTab }) {
+  const [activeTab, setActiveTab] = useState(initialTab || "personal");
 
   const [f, setF] = useState({
     firstName: candidate.firstName || candidate.name?.split(" ")[0] || "",
@@ -534,7 +535,7 @@ function ProfileBuilder({ candidate, onClose, onSave }) {
             />
           ) : null}
 
-          <SheetSection title="Šta da kažeš za 60 sekundi">
+          <SheetSection title="Plan za 60 sekundi">
             <ol className="divide-y divide-line rounded-xl border border-line">
               {[
                 ["0:00", "Ko si: ime, grad, fakultet, hobi."],
@@ -548,6 +549,10 @@ function ProfileBuilder({ candidate, onClose, onSave }) {
                 </li>
               ))}
             </ol>
+          </SheetSection>
+
+          <SheetSection title="Kako da snimiš video" hint="Uputstvo agencije i primeri drugih studenata.">
+            <VideoGuide inline />
           </SheetSection>
         </div>
       )}

@@ -72,6 +72,7 @@ export default function DocumentsView({ ctx }) {
     isReady,
     status,
     goTo,
+    setShowProfileBuilderModal,
   } = ctx;
   const ds = getDs160Status(candidate.ds160);
   const faculty = candidate.facultyCertFileName || facultyFile;
@@ -113,7 +114,7 @@ export default function DocumentsView({ ctx }) {
               Pogledaj
             </a>
           ) : (
-            <LinkButton onClick={() => goTo("put", "task-video", "step1")}>Dodaj link</LinkButton>
+            <LinkButton onClick={() => setShowProfileBuilderModal("video")}>Dodaj video</LinkButton>
           )}
         </DocRow>
         <DocRow

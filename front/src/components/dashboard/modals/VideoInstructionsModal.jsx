@@ -58,38 +58,42 @@ function Rows({ items }) {
   );
 }
 
-export default function VideoInstructionsModal({ isOpen, onClose }) {
+const pdfLinkCls =
+  "text-[13px] font-medium text-ink underline decoration-line-strong underline-offset-4 hover:decoration-ink";
+
+/** Uputstvo za video (pravila, šta da kažeš, primeri) — koristi se u profilu i kao zaseban prozor. */
+export function VideoGuide({ inline = false }) {
   const [tab, setTab] = useState("pravila");
-  if (!isOpen) return null;
-
   return (
-    <Sheet
-      onClose={onClose}
-      title="Kako da snimiš video"
-      subtitle="Uputstvo agencije za video predstavljanje"
-      nav={<SheetTabs tabs={TABS} active={tab} onChange={setTab} />}
-      footer={
-        <SheetFooter
-          left={
-            <a
-              href="/documents/AA_Instrukcija_za_video_CV.pdf"
-              download="AA_Instrukcija_za_video_CV.pdf"
-              className="text-[13px] font-medium text-ink underline decoration-line-strong underline-offset-4 hover:decoration-ink"
-            >
-              Uputstvo (PDF)
-            </a>
-          }
-        >
-          <Button variant="primary" onClick={onClose}>
-            Razumem
-          </Button>
-        </SheetFooter>
-      }
-    >
-      {tab === "pravila" && <Rows items={RULES} />}
+    <div className="space-y-5">
+      <div className={inline ? "flex gap-1" : "hidden"}>
+        {TABS.map((t) => (
+          <button
+            key={t.id}
+            type="button"
+            onClick={() => setTab(t.id)}
+            className={
+              "rounded-full px-3.5 py-1.5 text-[13px] font-medium transition-colors " +
+              (tab === t.id ? "bg-ink text-white" : "text-ink-3 hover:bg-surface hover:text-ink")
+            }
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+      <GuideBody tab={inline ? tab : null} />
+    </div>
+  );
+}
 
-      {tab === "sadrzaj" && (
-        <div className="space-y-8">
+function GuideBody({ tab }) {
+  const show = (id) => tab === null || tab === id;
+  return (
+    <div className="space-y-8">
+      {show("pravila") && <Rows items={RULES} />}
+
+      {show("sadrzaj") && (
+        <>
           <SheetSection title="Obavezno">
             <Rows items={MUST} />
           </SheetSection>
@@ -109,10 +113,10 @@ export default function VideoInstructionsModal({ isOpen, onClose }) {
               „Šta još kompanija koja te zapošljava treba da zna o tebi?“
             </p>
           </SheetSection>
-        </div>
+        </>
       )}
 
-      {tab === "primeri" && (
+      {show("primeri") && (
         <div className="space-y-4">
           <iframe
             src="https://www.youtube.com/embed/5nfIF6QW3RM"
@@ -135,8 +139,40 @@ export default function VideoInstructionsModal({ isOpen, onClose }) {
               </li>
             ))}
           </ul>
+          <a href="/documents/AA_Instrukcija_za_video_CV.pdf" download="AA_Instrukcija_za_video_CV.pdf" className={pdfLinkCls}>
+            Celo uputstvo agencije (PDF)
+          </a>
         </div>
       )}
+    </div>
+  );
+}
+
+export default function VideoInstructionsModal({ isOpen, onClose }) {
+  const [tab, setTab] = useState("pravila");
+  if (!isOpen) return null;
+
+  return (
+    <Sheet
+      onClose={onClose}
+      title="Kako da snimiš video"
+      subtitle="Uputstvo agencije za video predstavljanje"
+      nav={<SheetTabs tabs={TABS} active={tab} onChange={setTab} />}
+      footer={
+        <SheetFooter
+          left={
+            <a href="/documents/AA_Instrukcija_za_video_CV.pdf" download="AA_Instrukcija_za_video_CV.pdf" className={pdfLinkCls}>
+              Uputstvo (PDF)
+            </a>
+          }
+        >
+          <Button variant="primary" onClick={onClose}>
+            Razumem
+          </Button>
+        </SheetFooter>
+      }
+    >
+      <GuideBody tab={tab} />
     </Sheet>
   );
 }

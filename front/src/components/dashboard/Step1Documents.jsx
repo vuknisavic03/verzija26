@@ -5,7 +5,6 @@ import { Button } from "../ui";
 import { UploadIcon, SparklesIcon } from "./icons";
 import { StepShell, TaskList, Actions, LinkButton, FileLine, Notice, StatusPill } from "./ui";
 import { getTranslatedFacultyName, getTranslatedStudyYear, openPrintableTranslationWindow } from "../../data/candidateStore";
-import { inputCls } from "../ui";
 
 export function buildDocumentTasks(ctx) {
   const {
@@ -18,13 +17,6 @@ export function buildDocumentTasks(ctx) {
     isRequirementsMet,
     handleSubmitForReview,
     setShowProfileBuilderModal,
-    setShowVideoModal,
-    isYoutubeEditing,
-    setIsYoutubeEditing,
-    youtubeInput,
-    setYoutubeInput,
-    handleSaveYoutube,
-    embedUrl,
     pickCv,
     isUploadingCv,
     setCvFile,
@@ -72,78 +64,33 @@ export function buildDocumentTasks(ctx) {
     {
       id: "profile",
       title: "Popuni profil za poslodavce",
-      state: open(candidate.profileCompleted),
-      status: candidate.profileCompleted ? "Popunjen" : "Nije popunjen",
-      desc: candidate.profileCompleted
-        ? `${candidate.workExperience?.length || 0} radnih iskustava · dostupnost ${av.startDate || "25.05.2026"} – ${av.endDate || "25.09.2026"} · engleski ${candidate.englishLevel || candidate.preferences?.englishLevel || "B2"}`
-        : "Iskustvo, dostupnost i engleski — po ovome te poslodavci biraju. Oko 10 minuta.",
+      state: open(candidate.profileCompleted && candidate.youtubeUrl),
+      status: candidate.profileCompleted && candidate.youtubeUrl
+        ? "Popunjen"
+        : candidate.profileCompleted
+        ? "Fali video"
+        : "Nije popunjen",
+      desc:
+        candidate.profileCompleted && candidate.youtubeUrl
+          ? `${candidate.workExperience?.length || 0} radnih iskustava · dostupnost ${av.startDate || "25.05.2026"} – ${av.endDate || "25.09.2026"} · engleski ${candidate.englishLevel || candidate.preferences?.englishLevel || "B2"} · video dodat`
+          : candidate.profileCompleted
+          ? "Profil je popunjen — ostao je još link do video predstavljanja (poslednji korak profila)."
+          : "Pet kratkih koraka: o tebi, datumi, iskustvo, posao i video na engleskom. Po ovome te poslodavci biraju.",
       render: (isNext) => (
         <Actions>
-          {candidate.profileCompleted ? (
+          {candidate.profileCompleted && candidate.youtubeUrl ? (
             <LinkButton onClick={() => setShowProfileBuilderModal(true)}>Izmeni profil</LinkButton>
           ) : (
-            <Button variant={isNext ? "primary" : "dark"} size="sm" onClick={() => setShowProfileBuilderModal(true)}>
-              Popuni profil
+            <Button
+              variant={isNext ? "primary" : "dark"}
+              size="sm"
+              onClick={() => setShowProfileBuilderModal(candidate.profileCompleted ? "video" : true)}
+            >
+              {candidate.profileCompleted ? "Dodaj video" : "Popuni profil"}
             </Button>
           )}
         </Actions>
       ),
-    },
-    {
-      id: "video",
-      title: t("dash.youtubeTitle"),
-      state: open(candidate.youtubeUrl),
-      status: candidate.youtubeUrl ? "Sačuvan" : "Nema linka",
-      desc: candidate.youtubeUrl
-        ? null
-        : "60–90 sekundi na engleskom, postavljeno na YouTube.",
-      render: (isNext) =>
-        isYoutubeEditing ? (
-          <div className="space-y-3">
-            <form onSubmit={handleSaveYoutube} className="flex max-w-xl flex-col gap-2 sm:flex-row">
-              <input
-                type="url"
-                required
-                value={youtubeInput}
-                onChange={(e) => setYoutubeInput(e.target.value)}
-                placeholder="https://youtu.be/…"
-                aria-label="YouTube link"
-                className={inputCls + " sm:flex-1"}
-              />
-              <Button type="submit" variant={isNext ? "primary" : "dark"}>
-                Sačuvaj link
-              </Button>
-            </form>
-            <span className="flex flex-wrap gap-x-4 gap-y-1">
-              <LinkButton onClick={() => setShowVideoModal(true)}>Kako da snimim video</LinkButton>
-              <a
-                href="/documents/AA_Instrukcija_za_video_CV.pdf"
-                download="AA_Instrukcija_za_video_CV.pdf"
-                className="text-[13px] font-medium text-ink underline decoration-line-strong underline-offset-4 hover:decoration-ink"
-              >
-                Uputstvo (PDF)
-              </a>
-              {candidate.youtubeUrl && <LinkButton onClick={() => setIsYoutubeEditing(false)}>Otkaži</LinkButton>}
-            </span>
-          </div>
-        ) : (
-          <div className="space-y-3">
-            {embedUrl ? (
-              <iframe
-                src={embedUrl}
-                title="Video predstavljanje"
-                className="aspect-video w-full max-w-xs rounded-xl border border-line"
-                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                allowFullScreen
-              />
-            ) : (
-              <a href={candidate.youtubeUrl} target="_blank" rel="noopener noreferrer" className="block truncate text-sm text-ink underline">
-                {candidate.youtubeUrl}
-              </a>
-            )}
-            {!locked && <LinkButton onClick={() => setIsYoutubeEditing(true)}>Promeni link</LinkButton>}
-          </div>
-        ),
     },
     {
       id: "cv",
@@ -284,7 +231,7 @@ export function buildDocumentTasks(ctx) {
         ? "Vraćen na dopunu"
         : !isRegistrationDone
         ? "Posle registracije"
-        : "Posle stavki 2–5",
+        : "Posle stavki 1–4",
       desc: isDocumentsApproved
         ? null
         : isDocumentsPending
