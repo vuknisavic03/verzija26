@@ -140,8 +140,8 @@ export default function DiscountsSection() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Popusti, Promocije i Afilijati"
-        subtitle="Upravljajte popustima (obračun odmah ili na kraju), ručno dodajte nove, i pratite ispunjenost uslova za grupe (5+) i preporuke."
+        title="Popusti"
+        subtitle="Promocije, preporuke i grupni popusti."
         action={
           activeTab === "affiliates" ? (
             <PrimaryButton onClick={() => setAffiliateModalOpen(true)}>

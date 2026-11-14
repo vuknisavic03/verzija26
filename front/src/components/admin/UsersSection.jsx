@@ -55,8 +55,9 @@ import {
   GenerateCodeModal,
 } from "./modals/PreAppModals";
 import CandidateApplicationModal from "./modals/CandidateApplicationModal";
+import { candidateQueue } from "./queue";
 
-export default function UsersSection() {
+export default function UsersSection({ openCandidateId = null, onOpened = () => {} }) {
   const { t } = useTranslation();
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState("all");
@@ -117,6 +118,18 @@ export default function UsersSection() {
 
   const [selectedCandidate, setSelectedCandidate] = useState(null);
   const [copiedCode, setCopiedCode] = useState("");
+
+  // Otvaranje dosijea sa Pregleda (početne admina)
+  useEffect(() => {
+    if (!openCandidateId) return;
+    const c = getCandidates().find((x) => String(x.id) === String(openCandidateId));
+    if (c) {
+      setActiveTab("candidates");
+      setSelectedCandidate(c);
+    }
+    onOpened();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openCandidateId]);
 
   const inputCls =
     "w-full rounded-lg border border-line-strong bg-white py-2.5 pl-9 pr-3.5 text-sm text-ink transition-colors duration-150 placeholder:text-ink-3/70 focus:border-ink focus:outline-hidden focus:ring-2 focus:ring-ink/10";
@@ -502,54 +515,54 @@ export default function UsersSection() {
 
   // KPI kartice
   const preAppKpis = [
-    { label: "Prijave u Fazi 0", value: preAppsList.length },
+    { label: "Nove prijave", value: preAppsList.length },
     {
-      label: "Čeka prvi kontakt (Trijaža)",
+      label: "Čeka poziv",
       value: preAppsList.filter((s) => !s.contactStatus || s.contactStatus === "NOT_ATTEMPTED").length,
       accent: true,
     },
     {
-      label: "Konsultacije (Zakazane / Održane)",
+      label: "Konsultacije",
       value: preAppsList.filter((s) => s.consultationStatus === "SCHEDULED" || s.consultationStatus === "ATTENDED").length,
     },
     {
-      label: "Kvalifikovano za Fazu 1 (Izdat kod)",
+      label: "Dobili kod",
       value: preAppsList.filter((s) => s.selectionDecision === "QUALIFIED" || Boolean(s.activationCode)).length,
       accent: true,
     },
   ];
 
   const candidateKpis = [
-    { label: t("admin.usersKpiTotal"), value: activeProgramCandidates.length },
-    { label: t("admin.usersKpiActive"), value: activeProgramCandidates.filter((s) => s.status !== "ready").length },
-    { label: "Aktivne pozivnice", value: invitations.filter((i) => i.status === "pending").length, accent: true },
-    { label: "Spremni / Viza", value: activeProgramCandidates.filter((s) => s.status === "ready").length, accent: true },
+    { label: "U programu", value: activeProgramCandidates.length },
+    { label: "Aktivni", value: activeProgramCandidates.filter((s) => s.status !== "ready").length },
+    { label: "Pozivnice", value: invitations.filter((i) => i.status === "pending").length, accent: true },
+    { label: "Viza odobrena", value: activeProgramCandidates.filter((s) => s.status === "ready").length, accent: true },
   ];
 
   const preAppFilters = [
-    ["all", "Sve prijave"],
-    ["not_attempted", "Neobrađene (bez poziva)"],
-    ["reached", "Ostvaren kontakt"],
-    ["consultation_scheduled", "Zakazane konsultacije"],
-    ["consultation_attended", "Održane konsultacije"],
-    ["qualified", "Kvalifikovani (Faza 1)"],
+    ["all", "Sve"],
+    ["not_attempted", "Bez poziva"],
+    ["reached", "Pozvani"],
+    ["consultation_scheduled", "Konsultacije zakazane"],
+    ["consultation_attended", "Konsultacije održane"],
+    ["qualified", "Dobili kod"],
     ["rejected", "Odbijeni"],
   ];
 
   const filters = [
     ["all", t("admin.usersAll")],
     ["review", "Registracija"],
-    ["docs", "Korak 1: Dokumenta"],
-    ["job", "Korak 2: Posao"],
-    ["departure", "Čekanje na vizu"],
+    ["docs", "Korak 1"],
+    ["job", "Korak 2"],
+    ["departure", "Korak 3"],
     ["ready", "Viza odobrena"],
   ];
 
   return (
     <>
       <PageHeader
-        title={t("admin.usersTitle")}
-        subtitle="Prijave, kandidati u programu i verifikacioni kodovi na jednom mestu."
+        title="Kandidati"
+        subtitle="Nove prijave, kandidati u programu i pozivni kodovi."
         action={
           <PrimaryButton onClick={() => setShowCodeModal(true)}>
             <PlusIcon /> {t("admin.generateCodeBtn")}
@@ -569,9 +582,9 @@ export default function UsersSection() {
       {/* Tabovi sekcije */}
       <div role="tablist" aria-label="Korisnici" className="no-scrollbar mb-6 flex gap-6 overflow-x-auto border-b border-line">
         {[
-          ["preApplications", "Prijave i selekcija", preAppsList.length],
-          ["candidates", "Kandidati u programu", activeProgramCandidates.length],
-          ["invitations", t("admin.pendingInvitations"), invitations.length],
+          ["preApplications", "Nove prijave", preAppsList.length],
+          ["candidates", "U programu", activeProgramCandidates.length],
+          ["invitations", "Pozivnice", invitations.length],
         ].map(([id, label, count]) => (
           <button
             key={id}
@@ -1105,15 +1118,15 @@ export default function UsersSection() {
                         <span className="block truncate text-sm font-semibold text-ink">{s.name}</span>
                         <div className="flex flex-wrap items-center gap-1.5 mt-0.5">
                           <span className="truncate text-xs text-ink-3">{s.email}</span>
-                          {Boolean(s.signedContractFileName || s.contractSigned) ? (
-                            <span className="inline-flex items-center rounded-sm bg-surface-2 px-1.5 py-0.2 text-2xs font-semibold text-emerald-700" title={`Ugovor: ${s.signedContractFileName || "Potpisan"}`}>
-                              Ugovor
-                            </span>
-                          ) : (
-                            <span className="inline-flex items-center rounded-sm bg-surface-2 px-1.5 py-0.2 text-2xs font-semibold text-amber-700" title="Ugovor nije okačen (uplate blokirane)">
-                              Bez ugovora
-                            </span>
-                          )}
+                          {(() => {
+                            const q = candidateQueue(s);
+                            return q.length ? (
+                              <span className="inline-flex items-center gap-1 text-xs font-medium text-amber-700" title={q.map((x) => x.title).join(", ")}>
+                                <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
+                                {q.length === 1 ? q[0].title : `${q.length} čeka tebe`}
+                              </span>
+                            ) : null;
+                          })()}
                         </div>
                       </span>
                     </div>
@@ -1129,7 +1142,7 @@ export default function UsersSection() {
                       onClick={() => setSelectedCandidate(s)}
                       className="flex cursor-pointer flex-col gap-1 min-w-0"
                     >
-                      <span className={`inline-flex w-fit items-center gap-1.5 rounded-lg border px-3 py-1 text-xs font-medium ${stepInfo.badgeCls}`}>
+                      <span className="inline-flex w-fit items-center gap-1.5 rounded-full border border-line bg-white px-2.5 py-0.5 text-xs font-medium text-ink-2">
                         <span className={`h-1.5 w-1.5 rounded-full ${stepInfo.dotCls}`} />
                         {stepInfo.stepTitle}
                       </span>

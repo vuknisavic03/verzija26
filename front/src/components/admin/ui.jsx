@@ -267,23 +267,36 @@ export function BriefcaseIcon({ className = ic }) {
   );
 }
 
+export function HomeIcon({ className = ic }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden="true">
+      <path d="M4 10.5L12 4l8 6.5V19a1 1 0 0 1-1 1h-4.5v-5h-5v5H5a1 1 0 0 1-1-1z" />
+    </svg>
+  );
+}
+
+// group: "work" (svakodnevni rad) | "site" (sajt i komunikacija). mobile: prikazuje se u donjoj navigaciji telefona.
 export const NAV = [
-  { id: "users", labelKey: "admin.navUsers", defaultLabel: "Korisnici", Icon: UsersIcon },
-  { id: "jobs", labelKey: "admin.navJobs", defaultLabel: "Baza poslova", Icon: BriefcaseIcon },
-  { id: "finances", labelKey: "admin.navFinances", Icon: BanknotesIcon },
-  { id: "discounts", labelKey: "admin.navDiscounts", Icon: TagNavIcon },
-  { id: "site", labelKey: "admin.navSite", Icon: SiteIcon },
-  { id: "comms", labelKey: "admin.navComms", Icon: CommsIcon },
-  { id: "chatbot", labelKey: "admin.navChat", Icon: KnowledgeIcon },
+  { id: "overview", defaultLabel: "Pregled", Icon: HomeIcon, group: "work", mobile: true },
+  { id: "users", defaultLabel: "Kandidati", Icon: UsersIcon, group: "work", mobile: true },
+  { id: "jobs", defaultLabel: "Poslovi", Icon: BriefcaseIcon, group: "work", mobile: true },
+  { id: "finances", defaultLabel: "Finansije", Icon: BanknotesIcon, group: "work", mobile: true },
+  { id: "discounts", defaultLabel: "Popusti", Icon: TagNavIcon, group: "work" },
+  { id: "site", defaultLabel: "Sajt", Icon: SiteIcon, group: "site" },
+  { id: "comms", defaultLabel: "Komunikacija", Icon: CommsIcon, group: "site" },
+  { id: "chatbot", defaultLabel: "Baza znanja", Icon: KnowledgeIcon, group: "site" },
 ];
 
 /* ---------- UI KOMPONENTE ---------- */
+const CARD =
+  "rounded-2xl border border-line bg-white shadow-[0_1px_2px_rgba(35,31,32,0.04),0_10px_30px_-18px_rgba(35,31,32,0.18)]";
+
 export function PageHeader({ title, subtitle, action }) {
   return (
-    <div className="mb-8 flex flex-wrap items-start justify-between gap-4">
-      <div>
-        <h1 className="font-display text-3xl font-bold leading-[1.1] text-ink">{title}</h1>
-        {subtitle && <p className="mt-2 max-w-3xl text-sm leading-relaxed text-ink-2">{subtitle}</p>}
+    <div className="mb-6 flex flex-wrap items-end justify-between gap-4 sm:mb-8">
+      <div className="min-w-0">
+        <h1 className="text-2xl font-semibold leading-tight text-ink [font-stretch:100%] tracking-[-0.02em] sm:text-[28px]">{title}</h1>
+        {subtitle && <p className="mt-1.5 max-w-3xl text-sm leading-relaxed text-ink-3">{subtitle}</p>}
       </div>
       {action}
     </div>
@@ -296,7 +309,7 @@ export function PrimaryButton({ children, onClick, type = "button", disabled = f
       type={type}
       onClick={onClick}
       disabled={disabled}
-      className={`inline-flex items-center justify-center gap-2 rounded-lg bg-ink px-4 py-2.5 text-sm font-semibold text-white transition-colors duration-150 hover:bg-neutral-950 disabled:cursor-not-allowed disabled:opacity-50 ${className}`}
+      className={`inline-flex h-10 items-center justify-center gap-2 rounded-full bg-ink px-4.5 text-sm font-semibold text-white transition-colors duration-150 hover:bg-neutral-950 disabled:cursor-not-allowed disabled:opacity-50 ${className}`}
     >
       {children}
     </button>
@@ -308,7 +321,7 @@ export function SecondaryButton({ children, onClick, type = "button", className 
     <button
       type={type}
       onClick={onClick}
-      className={`inline-flex items-center justify-center gap-2 rounded-lg border border-line-strong bg-white px-4 py-2.5 text-sm font-semibold text-ink transition-colors duration-150 hover:bg-surface ${className}`}
+      className={`inline-flex h-10 items-center justify-center gap-2 rounded-full border border-line-strong bg-white px-4.5 text-sm font-semibold text-ink transition-colors duration-150 hover:bg-surface ${className}`}
     >
       {children}
     </button>
@@ -316,7 +329,7 @@ export function SecondaryButton({ children, onClick, type = "button", className 
 }
 
 export function Card({ children, className = "" }) {
-  return <div className={`rounded-2xl border border-line bg-white ${className}`}>{children}</div>;
+  return <div className={`${CARD} ${className}`}>{children}</div>;
 }
 
 export function EmptyState({ children }) {
@@ -329,18 +342,33 @@ export function EmptyState({ children }) {
 
 export function StatCard({ label, value, accent = false }) {
   return (
-    <Card className="px-5 py-4">
+    <Card className="px-4 py-4 sm:px-5">
       <p className="text-[13px] text-ink-3">{label}</p>
-      <p className="mt-1.5 flex items-baseline gap-2">
-        <span className="font-display text-3xl font-bold tabular-nums text-ink">{value}</span>
+      <p className="mt-1 flex items-center gap-2">
+        <span className="text-2xl font-semibold tabular-nums text-ink sm:text-3xl">{value}</span>
         {accent && <span className="h-2 w-2 rounded-full bg-brand" aria-hidden="true" />}
       </p>
     </Card>
   );
 }
 
+const BADGE_DOT = {
+  slate: "bg-neutral-400",
+  amber: "bg-amber-500",
+  blue: "bg-ink",
+  violet: "bg-ink",
+  green: "bg-emerald-500",
+  red: "bg-red-500",
+};
+
+/** Oznaka statusa: bela, tanka ivica, tačka u boji statusa (isto kao u portalu kandidata). */
 export function Badge({ tone = "slate", children }) {
-  return <span className={`inline-flex items-center rounded-md px-2 py-0.5 text-xs font-medium ${TONE[tone] || TONE.slate}`}>{children}</span>;
+  return (
+    <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-line bg-white px-2.5 py-0.5 text-xs font-medium text-ink-2">
+      <span className={`h-1.5 w-1.5 rounded-full ${BADGE_DOT[tone] || BADGE_DOT.slate}`} />
+      {children}
+    </span>
+  );
 }
 
 export function GhostIconButton({ onClick, label, children, danger = false }) {
@@ -350,7 +378,7 @@ export function GhostIconButton({ onClick, label, children, danger = false }) {
       onClick={onClick}
       aria-label={label}
       title={label}
-      className={`flex h-8 w-8 items-center justify-center rounded-lg transition-colors duration-150 ${
+      className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition-colors duration-150 ${
         danger ? "text-red-500 hover:border-red-200 bg-white" : "text-ink-3 hover:bg-surface-2 hover:text-ink"
       }`}
     >
@@ -388,21 +416,23 @@ export function Modal({ title, onClose, children, footer, wide = false, extraWid
     : "max-w-xl lg:max-w-2xl xl:max-w-3xl";
 
   return (
-    <div className={`fixed inset-0 z-[80] flex justify-center ${panel ? "items-stretch p-0 sm:p-4 lg:p-6" : "items-center p-3 sm:p-5 lg:p-8"}`}>
-      <div className="absolute inset-0 bg-black/50 backdrop-blur-xs" onClick={onClose} aria-hidden="true" />
+    <div className={`fixed inset-0 z-[80] flex justify-center ${panel ? "items-stretch sm:p-4 lg:p-6" : "items-stretch sm:items-center sm:p-5 lg:p-8"}`}>
+      <div className="absolute inset-0 hidden bg-ink/45 backdrop-blur-[2px] sm:block" onClick={onClose} aria-hidden="true" />
       <div
         role="dialog"
         aria-modal="true"
         aria-label={title}
-        className={`relative flex w-full flex-col overflow-hidden bg-white shadow-2xl transition-all ${panel ? "h-full sm:rounded-2xl" : "max-h-[92vh] rounded-2xl border border-line"} ${widthClass}`}
+        className={`relative flex h-full w-full flex-col overflow-hidden bg-white sm:shadow-[0_30px_80px_-20px_rgba(35,31,32,0.45)] ${
+          panel ? "sm:rounded-2xl" : "sm:h-auto sm:max-h-[92vh] sm:rounded-2xl"
+        } ${widthClass}`}
       >
-        <div className="flex shrink-0 items-start justify-between gap-4 border-b border-line px-6 py-4 sm:px-8">
-          {header || <h2 className="text-lg font-semibold leading-snug text-ink">{title}</h2>}
+        <div className="flex shrink-0 items-start justify-between gap-4 border-b border-line px-4 pb-3.5 pt-[max(0.875rem,env(safe-area-inset-top))] sm:px-6 sm:pb-4 sm:pt-4">
+          {header || <h2 className="text-[17px] font-semibold leading-snug text-ink sm:text-lg">{title}</h2>}
           <GhostIconButton label="Zatvori" onClick={onClose}><XIcon /></GhostIconButton>
         </div>
-        <div className={bodyClassName || "flex-1 overflow-y-auto p-6 sm:p-8"}>{children}</div>
+        <div className={bodyClassName || "min-h-0 flex-1 overflow-y-auto px-4 py-5 sm:px-6 sm:py-6"}>{children}</div>
         {footer && (
-          <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-t border-line bg-white px-6 py-4 sm:px-8">
+          <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-t border-line bg-white px-4 pb-[max(0.875rem,env(safe-area-inset-bottom))] pt-3.5 sm:px-6 sm:py-4">
             {footer}
           </div>
         )}

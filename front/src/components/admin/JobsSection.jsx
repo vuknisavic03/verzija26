@@ -135,8 +135,8 @@ export default function JobsSection() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Baza poslova u SAD"
-        subtitle="Evidencija, unos i izmena radnih ponuda američkih poslodavaca koje se nude kandidatima"
+        title="Poslovi"
+        subtitle="Ponude poslodavaca koje kandidati vide u portalu."
         action={
           <button
             type="button"

@@ -24,31 +24,16 @@ import {
 import NewInvoiceModal from "../../NewInvoiceModal";
 import ProfileBuilderModal from "../../ProfileBuilderModal";
 import { getJobs } from "../../../data/jobsStore";
-import {
-  FIELD_CLS,
-  STATUS,
-  STATUS_FLOW,
-  CheckIcon,
-  PlusIcon,
-  XIcon,
-  Modal,
-  Field,
-  PrimaryButton,
-  SecondaryButton,
-} from "../ui";
+import { FIELD_CLS, STATUS_FLOW, PlusIcon, XIcon, Modal, Field } from "../ui";
+import { Button } from "../../ui";
+import { TaskIcon, DataList, cardCls } from "../../dashboard/ui";
 
 export default function CandidateApplicationModal({ candidate, onSave, onClose }) {
   const { t } = useTranslation();
   const promotions = getPromotions();
 
   // Odredi početni tab na osnovu trenutnog koraka kandidata kako admin odmah vidi aktuelni korak
-  const getInitialTab = () => {
-    const st = candidate.status === "in_review" ? "docs" : candidate.status === "registered" ? "review" : (candidate.status || "review");
-    if (st === "docs") return "step1_docs";
-    if (st === "job") return "step2_job";
-    if (st === "departure" || st === "ready") return "step3_visa";
-    return "registration";
-  };
+  const getInitialTab = () => "overview";
 
   const [activeTab, setActiveTab] = useState(getInitialTab);
 
@@ -697,10 +682,9 @@ export default function CandidateApplicationModal({ candidate, onSave, onClose }
   const handleSelectStep = (stepId) => {
     setStatus(stepId);
     if (stepId === "ready") setHasVisa(true);
-    if (stepId === "review") setActiveTab("registration");
-    else if (stepId === "docs") setActiveTab("step1_docs");
-    else if (stepId === "job") setActiveTab("step2_job");
-    else if (stepId === "departure" || stepId === "ready") setActiveTab("step3_visa");
+    if (stepId === "review" || stepId === "docs") setActiveTab("docs");
+    else if (stepId === "job") setActiveTab("job");
+    else if (stepId === "departure" || stepId === "ready") setActiveTab("visa");
   };
 
   const currentFlow = STATUS_FLOW[status] || STATUS_FLOW.review;
@@ -748,481 +732,748 @@ export default function CandidateApplicationModal({ candidate, onSave, onClose }
 
   const remainingRsd = Math.round(remainingEur * currentNbsRate * 100) / 100;
 
-  // Navigacija dosijea: prvo put kandidata (koraci), pa trajni podaci dosijea.
+  // ================================================================
+  // PRIKAZ DOSIJEA
+  // Pregled (šta čeka admina) → Dokumenta (sve na jednom mestu) → Uplate → Posao → Viza i let → Podaci → Beleške
+  // ================================================================
+  const firstPaid = isFull ? Boolean(isFullPaymentPaid || firstInstallmentApproved) : Boolean(firstInstallmentApproved);
+  const ds160St = getDs160Status(candidate.ds160);
+  const jobAccepted =
+    jobApplicationStatus === "ACCEPTED" ||
+    (hasJob && !["SCHEDULED", "APPLIED", "NO_SLOTS", "REJECTED"].includes(jobApplicationStatus));
+  const offerSigned = Boolean(candidate.jobOfferSignedAt);
+  const docsSubmitted = Boolean(candidate.documentsVerificationStatus === "pending" || candidate.documentsSubmittedForReview);
+  const passportScan = passportScanFileName || passportScanDataUrl || passportScanUrl;
+
+  const stages = [
+    { id: "reg", label: "Registracija", title: "Ugovor i prva uplata", done: Boolean(contractApproved && firstPaid) },
+    { id: "docs", label: "Korak 1", title: "Dokumenta", done: Boolean(documentsApproved) },
+    { id: "job", label: "Korak 2", title: "Posao", done: Boolean(jobAccepted && (isFull || secondInstallmentPaid)) },
+    { id: "visa", label: "Korak 3", title: "Viza i polazak", done: Boolean(hasVisa) },
+  ];
+  const currentStageId = stages.find((s) => !s.done)?.id || null;
+
+  const go = (tab) => setActiveTab(tab);
+  const openContract = () =>
+    openDocumentPreview("Potpisani ugovor", signedContractFileName, signedContractUrl, signedContractDataUrl, "contract");
+  const rejectContract = () =>
+    setRejectionModal({ type: "contract", title: "Vrati ugovor na ispravku", reason: contractRejectionReason || "" });
+  const rejectDocs = () =>
+    setRejectionModal({ type: "documents", title: "Vrati dosije na dopunu", reason: documentsRejectionReason || "" });
+
+  // Red čekanja: sve što trenutno traži odluku ili unos agencije.
+  const queue = [
+    contractSigned &&
+      !contractApproved &&
+      contractVerificationStatus !== "rejected" && {
+        id: "contract",
+        tab: "docs",
+        title: "Pregledaj potpisani ugovor",
+        desc: signedContractFileName || "Kandidat je okačio potpisan ugovor.",
+        actions: (
+          <>
+            {signedContractFileName && (
+              <Button size="sm" variant="outline" onClick={openContract}>
+                Otvori
+              </Button>
+            )}
+            <Button size="sm" variant="dark" onClick={() => handleVerifyContractAction(true)}>
+              Odobri
+            </Button>
+            <Button size="sm" variant="ghost" onClick={rejectContract}>
+              Vrati
+            </Button>
+          </>
+        ),
+      },
+    !firstPaid &&
+      firstInstallmentStatus === "pending" && {
+        id: "pay1",
+        tab: "pay",
+        title: isFull ? `Potvrdi uplatu programa — ${finalPrice} €` : `Potvrdi uplatu I rate — ${r1Amount} €`,
+        desc: "Kandidat je prijavio uplatu. Proveri izvod pa proknjiži.",
+        actions: (
+          <Button size="sm" variant="dark" onClick={() => handleConfirmInstallmentAction(isFull ? "full" : 1)}>
+            Proknjiži
+          </Button>
+        ),
+      },
+    docsSubmitted &&
+      !documentsApproved &&
+      documentsVerificationStatus !== "rejected" && {
+        id: "dossier",
+        tab: "docs",
+        title: "Pregledaj dosije",
+        desc: "CV, video i oba uverenja su poslati na pregled.",
+        actions: (
+          <>
+            <Button size="sm" variant="outline" onClick={() => go("docs")}>
+              Dokumenta
+            </Button>
+            <Button size="sm" variant="dark" onClick={() => handleVerifyDocumentsAction(true)}>
+              Odobri
+            </Button>
+            <Button size="sm" variant="ghost" onClick={rejectDocs}>
+              Vrati
+            </Button>
+          </>
+        ),
+      },
+    jobApplicationStatus === "APPLIED" &&
+      !jobAccepted && {
+        id: "interview",
+        tab: "job",
+        title: "Dogovori razgovor sa poslodavcem",
+        desc: `${selectedJobTitle || "Pozicija"} — ${selectedJobEmployer || "poslodavac"}`,
+        actions: (
+          <Button size="sm" variant="dark" onClick={() => go("job")}>
+            Zakaži
+          </Button>
+        ),
+      },
+    jobApplicationStatus === "SCHEDULED" && {
+      id: "outcome",
+      tab: "job",
+      title: "Upiši ishod razgovora",
+      desc: interviewScheduledAt ? `Razgovor: ${interviewScheduledAt.replace("T", " ")}` : "Razgovor je zakazan.",
+      actions: (
+        <Button size="sm" variant="dark" onClick={() => go("job")}>
+          Otvori
+        </Button>
+      ),
+    },
+    !isFull &&
+      secondInstallmentStatus === "pending" &&
+      !secondInstallmentPaid && {
+        id: "pay2",
+        tab: "pay",
+        title: `Potvrdi uplatu II rate — ${r2Amount} €`,
+        desc: "Kandidat je prijavio uplatu.",
+        actions: (
+          <Button size="sm" variant="dark" onClick={() => handleConfirmInstallmentAction(2)}>
+            Proknjiži
+          </Button>
+        ),
+      },
+    !isFull &&
+      thirdInstallmentStatus === "pending" &&
+      !thirdInstallmentPaid && {
+        id: "pay3",
+        tab: "pay",
+        title: `Potvrdi uplatu III rate — ${r3Amount} €`,
+        desc: "Kandidat je prijavio uplatu.",
+        actions: (
+          <Button size="sm" variant="dark" onClick={() => handleConfirmInstallmentAction(3)}>
+            Proknjiži
+          </Button>
+        ),
+      },
+    status === "departure" &&
+      ds2019Status !== "ISSUED" && {
+        id: "ds2019",
+        tab: "visa",
+        title: "Unesi DS-2019 kad ga sponzor izda",
+        desc: ds2019Status === "IN_PROGRESS" ? "U izradi kod sponzora." : "Čeka II ratu.",
+        actions: (
+          <Button size="sm" variant="outline" onClick={() => go("visa")}>
+            Otvori
+          </Button>
+        ),
+      },
+    status === "departure" &&
+      !hasVisa &&
+      !embassyInterviewDate && {
+        id: "embassy",
+        tab: "visa",
+        title: "Zakaži razgovor u ambasadi",
+        desc: ds160St.isComplete ? "DS-160 je popunjen." : `DS-160: ${ds160St.filledCount} od ${ds160St.totalCount} polja.`,
+        actions: (
+          <Button size="sm" variant="outline" onClick={() => go("visa")}>
+            Otvori
+          </Button>
+        ),
+      },
+    status === "departure" &&
+      !hasVisa &&
+      embassyInterviewDate && {
+        id: "visa",
+        tab: "visa",
+        title: "Potvrdi vizu posle razgovora",
+        desc: `Ambasada: ${embassyInterviewDate.replace("T", " ")}`,
+        actions: (
+          <Button size="sm" variant="outline" onClick={() => go("visa")}>
+            Otvori
+          </Button>
+        ),
+      },
+  ].filter(Boolean);
+  const queueByTab = (tab) => queue.filter((q) => q.tab === tab).length;
+
   const tabs = [
-    {
-      group: "Put kandidata",
-      id: "registration",
-      label: "Ugovor i uplata",
-      done: Boolean(contractApproved && firstInstallmentApproved),
-      alert: Boolean((contractSigned && !contractApproved) || firstInstallmentStatus === "pending"),
-    },
-    {
-      group: "Put kandidata",
-      id: "step1_docs",
-      label: "Dokumenta",
-      done: Boolean(documentsApproved),
-      alert: Boolean(
-        !documentsApproved &&
-          (documentsVerificationStatus === "pending" ||
-            candidate.documentsSubmittedForReview ||
-            (cvFileName && facultyCertFileName && policeCertificateFileName))
-      ),
-    },
-    {
-      group: "Put kandidata",
-      id: "step2_job",
-      label: "Posao i ponuda",
-      done: Boolean((hasJob || selectedJobEmployer) && secondInstallmentPaid),
-      alert: Boolean(
-        interviewPrepStatus === "SCHEDULED" ||
-          (secondInstallmentStatus === "pending" && !secondInstallmentPaid)
-      ),
-    },
-    {
-      group: "Put kandidata",
-      id: "step3_visa",
-      label: "Viza i polazak",
-      done: Boolean(hasVisa),
-      alert: Boolean(thirdInstallmentStatus === "pending" && !thirdInstallmentPaid),
-    },
-    { group: "Dosije", id: "profile", label: "Lični podaci i paket", done: false, alert: false },
-    {
-      group: "Dosije",
-      id: "finances",
-      label: "Finansije i KIR",
-      count: candidateInvoices.length,
-      done: remainingEur === 0,
-      alert: false,
-    },
-    { group: "Dosije", id: "history", label: "Selekcija i beleške", done: false, alert: false },
+    { id: "overview", label: "Pregled", count: queue.length },
+    { id: "docs", label: "Dokumenta", count: queueByTab("docs") },
+    { id: "pay", label: "Uplate", count: queueByTab("pay") },
+    { id: "job", label: "Posao", count: queueByTab("job") },
+    { id: "visa", label: "Viza i let", count: queueByTab("visa") },
+    { id: "data", label: "Podaci" },
+    { id: "notes", label: "Beleške" },
   ];
   const activeTabInfo = tabs.find((x) => x.id === activeTab) || tabs[0];
-
   const initials = (firstName[0] || "") + (lastName[0] || "") || "AA";
+
+  const prof = candidate || {};
+  const av = prof.availability || {};
+  const pref = prof.preferences || {};
 
   return (
     <Modal
-      title={`Dosije kandidata: ${firstName} ${lastName}`.trim()}
+      title={`Dosije: ${firstName} ${lastName}`.trim()}
       onClose={onClose}
       panel
       bodyClassName="flex min-h-0 flex-1 flex-col lg:flex-row"
       header={
-        <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-x-5 gap-y-3">
-            <div className="flex min-w-0 items-center gap-3">
-              <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-surface-2 text-sm font-semibold text-ink">{initials}</span>
-              <div className="min-w-0">
-                <div className="flex flex-wrap items-center gap-2">
-                  <h2 className="truncate text-lg font-bold leading-tight text-ink">
-                    {firstName} {lastName}
-                  </h2>
-                  {candidate.activationCode && (
-                    <span className="rounded-md bg-surface-2 px-2 py-0.5 text-xs font-semibold tabular-nums text-ink-2">{candidate.activationCode}</span>
-                  )}
-                </div>
-                <p className="mt-0.5 truncate text-[13px] text-ink-3">
-                  {[email, phone, faculty].filter(Boolean).join(", ")}
-                </p>
-              </div>
+        <div className="flex min-w-0 flex-1 items-center gap-3">
+          <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-surface-2 text-sm font-semibold text-ink">{initials}</span>
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
+              <h2 className="truncate text-lg font-semibold leading-tight text-ink">
+                {firstName} {lastName}
+              </h2>
+              {candidate.activationCode && <span className="text-[13px] tabular-nums text-ink-3">{candidate.activationCode}</span>}
             </div>
-
+            <p className="mt-0.5 truncate text-[13px] text-ink-3">{[email, phone].filter(Boolean).join(" · ")}</p>
           </div>
-
         </div>
       }
       footer={
         <>
-          <p className="text-[13px] text-ink-2">
-            <span className="font-semibold text-ink">{stepInfo.stepTitle}:</span> {stepInfo.subLabel}
+          <p className="hidden text-[13px] text-ink-3 sm:block">
+            <span className="font-medium text-ink">{stepInfo.stepTitle}</span> · {stepInfo.subLabel}
           </p>
-          <div className="flex items-center gap-2">
-            <SecondaryButton onClick={onClose}>{t("admin.modalCancel")}</SecondaryButton>
-            <PrimaryButton onClick={handleSubmit}>Sačuvaj sve izmene</PrimaryButton>
+          <div className="ml-auto flex items-center gap-2">
+            <Button variant="ghost" onClick={onClose}>
+              {t("admin.modalCancel")}
+            </Button>
+            <Button variant="dark" onClick={handleSubmit}>
+              Sačuvaj izmene
+            </Button>
           </div>
         </>
       }
     >
-      {/* Leva navigacija dosijea */}
-      <nav aria-label="Delovi dosijea" className="shrink-0 border-b border-line bg-surface lg:w-60 lg:overflow-y-auto lg:border-b-0 lg:border-r">
-        <div className="no-scrollbar flex gap-1 overflow-x-auto p-2 lg:flex-col lg:gap-0 lg:p-3">
-          {tabs.map((tab, i) => {
+      {/* Navigacija dosijea */}
+      <nav aria-label="Delovi dosijea" className="shrink-0 border-b border-line bg-white lg:w-56 lg:overflow-y-auto lg:border-b-0 lg:border-r">
+        <div className="no-scrollbar flex gap-1 overflow-x-auto px-3 py-2.5 lg:flex-col lg:gap-0.5 lg:p-3">
+          {tabs.map((tab) => {
             const isActive = activeTab === tab.id;
-            const newGroup = i === 0 || tabs[i - 1].group !== tab.group;
             return (
-              <div key={tab.id} className="contents">
-                {newGroup && (
-                  <p className={`hidden px-3 pb-1.5 text-xs font-medium text-ink-3 lg:block ${i === 0 ? "pt-2" : "pt-5"}`}>{tab.group}</p>
-                )}
-                <button
-                  type="button"
-                  onClick={() => setActiveTab(tab.id)}
-                  aria-current={isActive ? "page" : undefined}
-                  className={`flex shrink-0 items-center justify-between gap-3 rounded-lg px-3 py-2.5 text-left text-sm transition-colors ${
-                    isActive ? "bg-white font-semibold text-ink shadow-sm ring-1 ring-line" : "font-medium text-ink-2 hover:bg-white/70 hover:text-ink"
-                  }`}
-                >
-                  <span className="whitespace-nowrap">
-                    {tab.label}
-                    {tab.count > 0 && <span className="ml-1.5 text-ink-3">{tab.count}</span>}
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => setActiveTab(tab.id)}
+                aria-current={isActive ? "page" : undefined}
+                className={`flex shrink-0 items-center justify-between gap-3 rounded-full px-3.5 py-1.5 text-left text-[13px] font-medium transition-colors lg:rounded-lg lg:py-2 lg:text-sm ${
+                  isActive ? "bg-ink text-white lg:bg-surface lg:text-ink" : "text-ink-3 hover:bg-surface hover:text-ink"
+                }`}
+              >
+                <span className="whitespace-nowrap">{tab.label}</span>
+                {tab.count > 0 && (
+                  <span
+                    className={`flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-[11px] font-semibold tabular-nums ${
+                      isActive ? "bg-brand text-ink" : "bg-brand text-ink"
+                    }`}
+                  >
+                    {tab.count}
                   </span>
-                  {tab.done ? (
-                    <CheckIcon className="h-4 w-4 shrink-0 text-emerald-600" />
-                  ) : tab.alert ? (
-                    <span className="h-2 w-2 shrink-0 rounded-full bg-ink" title="Čeka tvoju akciju" />
-                  ) : null}
-                </button>
-              </div>
+                )}
+              </button>
             );
           })}
         </div>
       </nav>
 
-      <form onSubmit={handleSubmit} className="min-h-0 flex-1 space-y-6 overflow-y-auto px-5 py-6 sm:px-8 sm:py-8">
-        <div className="flex flex-wrap items-baseline justify-between gap-3">
-          <h3 className="text-xl font-bold text-ink">{activeTabInfo.label}</h3>
-          {activeTabInfo.alert && !activeTabInfo.done && (
-            <span className="inline-flex items-center gap-1.5 rounded-lg bg-surface-2 px-3 py-1 text-xs font-semibold text-amber-700">
-              <span className="h-1.5 w-1.5 rounded-full bg-ink" /> Čeka tvoju akciju
-            </span>
-          )}
-        </div>
+      <form onSubmit={handleSubmit} className="min-h-0 flex-1 space-y-4 overflow-y-auto bg-surface px-4 py-5 sm:px-8 sm:py-7">
+        <h3 className="text-xl font-semibold text-ink [font-stretch:100%] tracking-[-0.015em]">{activeTabInfo.label}</h3>
 
         {adminToast && (
-          <div role="status" className="flex items-center justify-between rounded-xl border border-line bg-white px-4 py-3 text-sm font-semibold text-emerald-700">
+          <div role="status" className="flex items-start justify-between gap-3 rounded-xl bg-ink px-4 py-3 text-sm text-white">
             <span>{adminToast}</span>
-            <button type="button" onClick={() => setAdminToast("")} aria-label="Zatvori obaveštenje" className="ml-3 rounded p-1 text-emerald-800 hover:bg-emerald-100">
-              <XIcon />
+            <button type="button" onClick={() => setAdminToast("")} aria-label="Zatvori obaveštenje" className="-mr-1 rounded p-0.5 text-white/70 hover:text-white">
+              <XIcon className="h-4 w-4" />
             </button>
           </div>
         )}
 
-        {/* ================================================================ */}
-        {/* TAB 1: REGISTRACIJA & UGOVOR (Ugovor, Izjava, Pasoš, I rata)     */}
-        {/* ================================================================ */}
-        {activeTab === "registration" && (
-          <div className="space-y-5">
-            {/* 1. Verifikacija Ugovora i I rate (Glavni gate za prelazak u Korak 1) */}
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-              {/* Kartica Ugovora */}
-              <div
-                className={`rounded-xl border p-4 ${
-                  contractApproved
-                    ? "border-line bg-white"
-                    : contractVerificationStatus === "rejected"
-                    ? "border-red-200 bg-white"
-                    : "border-line bg-white"
-                }`}
-              >
-                <div className="flex items-start justify-between gap-2">
-                  <div>
-                    <span className="text-xs font-medium text-ink-3">
-                      Uslov 1 od 2
-                    </span>
-                    <h4 className="mt-0.5 text-[15px] font-semibold text-ink">
-                      Ugovor o posredovanju i izjava o odgovornosti
-                    </h4>
-                  </div>
-                  <span
-                    className={`rounded-full px-3 py-1 text-xs font-medium ${
-                      contractApproved
-                        ? "bg-surface-2 text-emerald-700"
-                        : contractVerificationStatus === "rejected"
-                        ? "bg-surface-2 text-red-700"
-                        : contractSigned
-                        ? "bg-surface-2 text-amber-700"
-                        : "bg-surface-2 text-ink-3"
-                    }`}
-                  >
-                    {contractApproved
-                      ? "Odobren"
-                      : contractVerificationStatus === "rejected"
-                      ? "Vraćen"
-                      : contractSigned
-                      ? "Čeka pregled"
-                      : "Nije otpremljen"}
-                  </span>
-                </div>
-
-                {/* Fajl potpisanog ugovora */}
-                <div className="mt-3 rounded-lg border border-line bg-white p-3">
-                  {signedContractFileName ? (
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <div className="min-w-0">
-                        <p className="truncate text-xs font-semibold text-ink">
-                          {signedContractFileName}
-                        </p>
-                        <p className="text-xs text-ink-3">
-                          Potpisan primerak
-                        </p>
+        {/* =================== PREGLED =================== */}
+        {activeTab === "overview" && (
+          <div className="space-y-4">
+            <Section title="Čeka tebe" aside={<span className="text-[13px] text-ink-3">{queue.length || "Ništa"}</span>}>
+              {queue.length === 0 ? (
+                <p className="text-sm text-ink-3">Nema ničeg na čekanju — red je na kandidatu.</p>
+              ) : (
+                <ul className="divide-y divide-line">
+                  {queue.map((q) => (
+                    <li key={q.id} className="flex flex-col gap-3 py-3.5 first:pt-0 last:pb-0 sm:flex-row sm:items-center sm:justify-between">
+                      <div className="flex min-w-0 gap-3.5">
+                        <TaskIcon state="wait" className="mt-0.5" />
+                        <div className="min-w-0">
+                          <p className="text-[15px] font-medium text-ink">{q.title}</p>
+                          {q.desc && <p className="mt-0.5 truncate text-[13px] text-ink-3">{q.desc}</p>}
+                        </div>
                       </div>
-                      <button
-                        type="button"
-                        onClick={() =>
-                          openDocumentPreview(
-                            "Svojeručno potpisani ugovor kandidata",
-                            signedContractFileName,
-                            signedContractUrl,
-                            signedContractDataUrl,
-                            "contract"
-                          )
-                        }
-                        className="rounded-lg bg-ink px-3 py-1.5 text-xs font-semibold text-white hover:opacity-90"
-                      >
-                        Otvori dokument
-                      </button>
-                    </div>
-                  ) : (
-                    <p className="text-xs text-ink-3">
-                      Potpisan ugovor još nije otpremljen.
-                    </p>
-                  )}
+                      <div className="flex shrink-0 flex-wrap items-center gap-2 pl-[2.125rem] sm:pl-0">{q.actions}</div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </Section>
 
-                  <div className="mt-2.5 flex flex-wrap items-center gap-2 border-t border-line pt-2.5">
-                    <label className="cursor-pointer rounded-lg border border-line-strong bg-surface px-2.5 py-1 text-xs font-semibold text-ink hover:bg-surface-2">
-                      {uploadingDocType === "signedContract" ? "Otpremanje..." : "Otpremi sken ugovora"}
-                      <input
-                        type="file"
-                        accept=".pdf,.jpg,.jpeg,.png"
-                        className="hidden"
-                        onChange={(e) => handleAdminDocUpload(e.target.files?.[0], "signedContract")}
-                      />
-                    </label>
-                    <button
-                      type="button"
-                      onClick={() => openPrintableContractWindow({ id: candidate.id, email: email })}
-                      className="rounded-lg border border-line-strong bg-white px-2.5 py-1 text-xs font-semibold text-ink hover:bg-surface-2"
-                    >
-                      Ugovor za štampu
-                    </button>
-                  </div>
-                </div>
+            <Section title="Put kandidata">
+              <ol className="grid gap-3 sm:grid-cols-4">
+                {stages.map((s) => {
+                  const isCurrent = s.id === currentStageId;
+                  return (
+                    <li key={s.id} className="flex gap-3 sm:block">
+                      <TaskIcon state={s.done ? "done" : isCurrent ? "current" : "locked"} isNext={isCurrent} />
+                      <div className="sm:mt-2.5">
+                        <p className="text-xs text-ink-3">{s.label}</p>
+                        <p className={`text-sm font-medium ${s.done || isCurrent ? "text-ink" : "text-ink-3"}`}>{s.title}</p>
+                      </div>
+                    </li>
+                  );
+                })}
+              </ol>
+            </Section>
 
-                {contractRejectionReason && !contractApproved && (
-                  <p className="mt-2 rounded-lg bg-surface-2 px-2.5 py-1.5 text-xs font-medium text-red-700">
-                    Razlog odbijanja: {contractRejectionReason}
-                  </p>
-                )}
-
-                <div className="mt-3 flex flex-wrap gap-2">
-                  <button
-                    type="button"
-                    onClick={() => handleVerifyContractAction(true)}
-                    className="rounded-lg bg-ink px-3 py-1.5 text-xs font-semibold text-white hover:bg-ink"
-                  >
-                    Odobri potpisani ugovor
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setRejectionModal({
-                        type: "contract",
-                        title: "Odbijanje ugovora uz obrazloženje",
-                        reason: contractRejectionReason || "",
-                      })
-                    }
-                    className="rounded-lg border border-red-300 bg-white px-3 py-1.5 text-xs font-semibold text-red-700 hover:border-red-200 bg-white"
-                  >
-                    Vrati na dopunu
-                  </button>
-                </div>
-              </div>
-
-              {/* Kartica I rate ili Uplate u celosti */}
-              <div
-                className={`rounded-xl border p-4 flex flex-col justify-between ${
-                  (isFull ? isFullPaymentPaid || firstInstallmentApproved : firstInstallmentApproved)
-                    ? "border-line bg-white"
-                    : firstInstallmentStatus === "pending"
-                    ? "border-line bg-white"
-                    : "border-line bg-white"
-                }`}
-              >
-                <div>
-                  <div className="flex items-start justify-between gap-2">
-                    <div>
-                      <span className="text-xs font-medium text-ink-3">
-                        Uslov 2 od 2
-                      </span>
-                      <h4 className="mt-0.5 text-[15px] font-semibold text-ink">
-                        {isFull
-                          ? `Uplata programa u celosti (${finalPrice} € u RSD)`
-                          : `Prva rata programa (${firstInstallmentAmount} € u RSD)`}
-                      </h4>
-                    </div>
-                    <span
-                      className={`rounded-full px-3 py-1 text-xs font-medium ${
-                        (isFull ? isFullPaymentPaid || firstInstallmentApproved : firstInstallmentApproved)
-                          ? "bg-surface-2 text-emerald-700"
-                          : firstInstallmentStatus === "pending"
-                          ? "bg-surface-2 text-amber-700"
-                          : "bg-surface-2 text-ink-3"
-                      }`}
-                    >
-                      {(isFull ? isFullPaymentPaid || firstInstallmentApproved : firstInstallmentApproved)
-                        ? "Plaćeno"
-                        : firstInstallmentStatus === "pending"
-                        ? "Prijavljena uplata"
-                        : "Nije plaćeno"}
-                    </span>
-                  </div>
-
-                  <p className="mt-2 text-xs text-ink-2 leading-relaxed">
-                    {isFull
-                      ? `Jednokratna uplata od ${finalPrice} € po srednjem kursu NBS. Kad su ugovor i uplata potvrđeni, kandidat prelazi na Korak 1.`
-                      : `Rok je 7 dana od potpisivanja ugovora, po srednjem kursu NBS. Kad su ugovor i uplata potvrđeni, kandidat prelazi na Korak 1.`}
-                  </p>
-                </div>
-
-                <div className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-line pt-3">
-                  <select
-                    value={(isFull ? isFullPaymentPaid || firstInstallmentApproved : firstInstallmentApproved) ? "paid" : firstInstallmentStatus}
-                    onChange={(e) => {
-                      const val = e.target.value;
-                      setFirstInstallmentStatus(val);
-                      setFirstInstallmentApproved(val === "paid");
-                      if (isFull) setIsFullPaymentPaid(val === "paid");
-                    }}
-                    className="rounded-lg border border-line-strong bg-white px-2.5 py-1.5 text-xs font-semibold"
-                  >
-                    <option value="unpaid">Nije uplaćeno</option>
-                    <option value="pending">Uplata prijavljena</option>
-                    <option value="paid">Plaćeno</option>
-                  </select>
-
-                  {!(isFull ? isFullPaymentPaid || firstInstallmentApproved : firstInstallmentApproved) && (
-                    <button
-                      type="button"
-                      onClick={() => handleConfirmInstallmentAction(isFull ? "full" : 1)}
-                      className="rounded-lg bg-ink px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-ink"
-                    >
-                      {isFull
-                        ? `Potvrdi uplatu (${finalPrice} €)`
-                        : `Potvrdi uplatu I rate (${firstInstallmentAmount} €)`}
-                    </button>
-                  )}
-                </div>
-              </div>
+            <div className="grid gap-4 lg:grid-cols-2">
+              <Section title="Ukratko">
+                <DataList
+                  cols={1}
+                  items={[
+                    ["Program", selectedPackage.name],
+                    ["Cena", `${formatEur(finalPrice)}${numDiscount ? ` (popust ${formatEur(numDiscount)})` : ""}`],
+                    ["Plaćeno", `${formatEur(totalPaidEur)} od ${formatEur(finalPrice)}`],
+                    ["Posao", selectedJobEmployer ? `${selectedJobTitle} — ${selectedJobEmployer}` : "Nije izabran"],
+                    ["Fakultet", faculty || "—"],
+                  ]}
+                />
+              </Section>
+              <Section title="Dokumenta" aside={<button type="button" onClick={() => go("docs")} className={linkCls}>Sva dokumenta</button>}>
+                <ul className="divide-y divide-line">
+                  {[
+                    ["Potpisani ugovor", contractApproved ? "done" : contractSigned ? "wait" : "current"],
+                    ["CV", cvFileName ? "done" : "current"],
+                    ["Video", youtubeUrl ? "done" : "current"],
+                    ["Uverenje o studiranju", facultyCertFileName ? (facultyCertAiTranslation ? "done" : "wait") : "current"],
+                    ["MUP uverenje", policeCertificateFileName ? (policeCertificateTranslated ? "done" : "wait") : "current"],
+                    ["DS-160", ds160St.isComplete ? "done" : ds160St.isStarted ? "wait" : "current"],
+                  ].map(([n, st]) => (
+                    <li key={n} className="flex items-center gap-3 py-2 first:pt-0 last:pb-0">
+                      <TaskIcon state={st} className="h-4 w-4" />
+                      <span className="text-sm text-ink-2">{n}</span>
+                    </li>
+                  ))}
+                </ul>
+              </Section>
             </div>
-
           </div>
         )}
 
-        {/* ================================================================ */}
-        {/* TAB: LIČNI PODACI, PASOŠ, PAKET I JEMAC                         */}
-        {/* ================================================================ */}
-        {activeTab === "profile" && (
-          <div className="space-y-5">
-            {/* 2. Lični podaci i Pasoš */}
-            <div className="rounded-xl border border-line bg-white p-4 space-y-4">
-              <h4 className="text-[15px] font-semibold text-ink">
-                Lični podaci
-              </h4>
-              <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-3">
-                <Field label="Ime">
-                  <input value={firstName} onChange={(e) => setFirstName(e.target.value)} className={FIELD_CLS} required />
-                </Field>
-                <Field label="Prezime">
-                  <input value={lastName} onChange={(e) => setLastName(e.target.value)} className={FIELD_CLS} required />
-                </Field>
-                <Field label="E-mail">
-                  <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} className={FIELD_CLS} required />
-                </Field>
-                <Field label="Broj telefona">
-                  <input value={phone} onChange={(e) => setPhone(e.target.value)} className={FIELD_CLS} />
-                </Field>
-                <Field label="JMBG (13 cifara)">
-                  <input value={jmbg} onChange={(e) => setJmbg(e.target.value)} maxLength={13} className={`${FIELD_CLS} tabular-nums`} />
-                </Field>
-                <Field label="Broj pasoša / lične karte">
-                  <input value={passportNumber} onChange={(e) => { setPassportNumber(e.target.value); setIdCardNumber(e.target.value); }} className={`${FIELD_CLS} tabular-nums`} />
-                </Field>
-                <Field label="Datum rođenja (DD/MM/GGGG)">
-                  <input value={birthDate} onChange={(e) => setBirthDate(e.target.value)} className={FIELD_CLS} />
-                </Field>
-                <Field label="Važenje pasoša (DD/MM/GGGG)">
-                  <input value={passportExpiryDate} onChange={(e) => setPassportExpiryDate(e.target.value)} className={FIELD_CLS} />
-                </Field>
-                <Field label="Pol">
-                  <select value={gender} onChange={(e) => setGender(e.target.value)} className={FIELD_CLS}>
-                    <option value="Muški">Muški</option>
-                    <option value="Ženski">Ženski</option>
-                  </select>
-                </Field>
-                <Field label="Mesto rođenja">
-                  <input value={birthPlace} onChange={(e) => setBirthPlace(e.target.value)} className={FIELD_CLS} />
-                </Field>
-                <Field label="Državljanstvo">
-                  <input value={citizenship} onChange={(e) => setCitizenship(e.target.value)} className={FIELD_CLS} />
-                </Field>
-                <Field label="Adresa prebivališta">
-                  <input value={address} onChange={(e) => setAddress(e.target.value)} className={FIELD_CLS} />
-                </Field>
-                <Field label="Fakultet / Visoka škola">
-                  <input value={faculty} onChange={(e) => setFaculty(e.target.value)} className={FIELD_CLS} />
-                </Field>
-                <Field label="Godina studija">
-                  <select value={studyYear} onChange={(e) => setStudyYear(e.target.value)} className={FIELD_CLS}>
-                    <option value="YEAR_1">I godina osnovnih studija</option>
-                    <option value="YEAR_2">II godina osnovnih studija</option>
-                    <option value="YEAR_3">III godina osnovnih studija</option>
-                    <option value="YEAR_4">IV godina osnovnih studija</option>
-                    <option value="MASTER">Master studije</option>
-                  </select>
-                </Field>
-                <Field label="Ostvareni ESPB bodovi">
-                  <input type="number" min="0" max="300" value={ectsPoints} onChange={(e) => setEctsPoints(e.target.value)} className={FIELD_CLS} />
-                </Field>
-              </div>
+        {/* =================== DOKUMENTA =================== */}
+        {activeTab === "docs" && (
+          <div className="space-y-4">
+            <Section
+              title="Ugovor"
+              aside={
+                <button type="button" onClick={() => openPrintableContractWindow({ id: candidate.id, email })} className={linkCls}>
+                  Ugovor za štampu
+                </button>
+              }
+            >
+              <ul className="divide-y divide-line">
+                <DocRow
+                  name="Potpisani ugovor"
+                  sub={signedContractFileName || "Kandidat ga još nije okačio"}
+                  state={contractApproved ? "done" : contractVerificationStatus === "rejected" ? "danger" : contractSigned ? "wait" : "current"}
+                  status={contractApproved ? "Odobren" : contractVerificationStatus === "rejected" ? "Vraćen" : contractSigned ? "Čeka pregled" : "Nedostaje"}
+                >
+                  {signedContractFileName && (
+                    <button type="button" onClick={openContract} className={linkCls}>
+                      Otvori
+                    </button>
+                  )}
+                  <Upload busy={uploadingDocType === "signedContract"} onFile={(f) => handleAdminDocUpload(f, "signedContract")} label={signedContractFileName ? "Zameni" : "Okači sken"} />
+                  {contractSigned && !contractApproved && (
+                    <>
+                      <button type="button" onClick={() => handleVerifyContractAction(true)} className={linkCls}>
+                        Odobri
+                      </button>
+                      <button type="button" onClick={rejectContract} className={`${linkCls} text-red-700`}>
+                        Vrati
+                      </button>
+                    </>
+                  )}
+                </DocRow>
+                {contractRejectionReason && !contractApproved && (
+                  <li className="py-2 text-[13px] text-red-700">Razlog: {contractRejectionReason}</li>
+                )}
+                <DocRow name="Pasoš" sub={passportScanFileName || "Sken nije okačen"} state={passportScan ? "done" : "current"} status={passportScan ? "Okačen" : "Nedostaje"}>
+                  {passportScan && (
+                    <button
+                      type="button"
+                      onClick={() => openDocumentPreview("Pasoš", passportScanFileName || "Pasos.pdf", passportScanUrl, passportScanDataUrl, "passport")}
+                      className={linkCls}
+                    >
+                      Otvori
+                    </button>
+                  )}
+                  <Upload busy={uploadingDocType === "passport"} onFile={(f) => handleAdminDocUpload(f, "passport")} label={passportScan ? "Zameni" : "Okači sken"} />
+                </DocRow>
+              </ul>
+            </Section>
 
-              {/* Sken pasoša */}
-              <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-line bg-surface px-3.5 py-2.5">
-                <div>
-                  <p className="text-xs font-semibold text-ink">
-                    Sken biometrijskog pasoša: {passportScanFileName || "Nije otpremljen"}
-                  </p>
-                  <p className="text-xs text-ink-3">
-                    Potreban za tačno popunjavanje ugovora i DS-2019 obrasca
-                  </p>
-                </div>
-                <div className="flex items-center gap-2">
-                  {(passportScanFileName || passportScanDataUrl || passportScanUrl) && (
+            <Section
+              title="Dosije"
+              hint="Ovo kandidat šalje na pregled u Koraku 1. Kad je sve u redu, odobri — kandidat prelazi na izbor posla."
+              aside={
+                <StatusText state={documentsApproved ? "done" : documentsVerificationStatus === "rejected" ? "danger" : docsSubmitted ? "wait" : "current"}>
+                  {documentsApproved ? "Odobren" : documentsVerificationStatus === "rejected" ? "Vraćen" : docsSubmitted ? "Na pregledu" : "Nije poslat"}
+                </StatusText>
+              }
+            >
+              <ul className="divide-y divide-line">
+                <DocRow name="CV" sub={cvFileName || "Nije okačen"} state={cvFileName ? "done" : "current"} status={cvFileName ? "Okačen" : "Nedostaje"}>
+                  {(cvDataUrl || cvUrl) && (
+                    <button type="button" onClick={() => openDocumentPreview("CV", cvFileName, cvUrl, cvDataUrl, "documents")} className={linkCls}>
+                      Otvori
+                    </button>
+                  )}
+                  <Upload busy={uploadingDocType === "cv"} onFile={(f) => handleAdminDocUpload(f, "cv")} label={cvFileName ? "Zameni" : "Okači"} accept=".pdf,.doc,.docx" />
+                  <button type="button" onClick={() => setShowProfileBuilder(true)} className={linkCls}>
+                    Profil i CV builder
+                  </button>
+                </DocRow>
+                <DocRow name="Video predstavljanje" sub={youtubeUrl || "Link nije dodat"} state={youtubeUrl ? "done" : "current"} status={youtubeUrl ? "Dodat" : "Nedostaje"}>
+                  <input
+                    type="url"
+                    value={youtubeUrl}
+                    onChange={(e) => setYoutubeUrl(e.target.value)}
+                    placeholder="https://youtu.be/…"
+                    className={`${FIELD_CLS} max-w-sm`}
+                  />
+                  {youtubeUrl && (
+                    <a href={youtubeUrl} target="_blank" rel="noreferrer" className={linkCls}>
+                      Pogledaj
+                    </a>
+                  )}
+                </DocRow>
+                <DocRow
+                  name="Uverenje o studiranju"
+                  sub={facultyCertFileName || "Nije okačeno"}
+                  state={facultyCertFileName ? (facultyCertAiTranslation ? "done" : "wait") : "current"}
+                  status={facultyCertFileName ? (facultyCertAiTranslation ? "Sa prevodom" : "Fali prevod") : "Nedostaje"}
+                >
+                  {(facultyCertDataUrl || facultyCertUrl) && (
+                    <button
+                      type="button"
+                      onClick={() => openDocumentPreview("Uverenje o studiranju", facultyCertFileName, facultyCertUrl, facultyCertDataUrl, "documents")}
+                      className={linkCls}
+                    >
+                      Otvori
+                    </button>
+                  )}
+                  <Upload busy={uploadingDocType === "facultyCert"} onFile={(f) => handleAdminDocUpload(f, "facultyCert")} label={facultyCertFileName ? "Zameni" : "Okači"} />
+                  <Toggle checked={facultyCertAiTranslation} onChange={setFacultyCertAiTranslation}>
+                    Prevod gotov
+                  </Toggle>
+                </DocRow>
+                <DocRow
+                  name="Uverenje o nekažnjavanju (MUP)"
+                  sub={policeCertificateFileName || "Nije okačeno"}
+                  state={policeCertificateFileName ? (policeCertificateTranslated ? "done" : "wait") : "current"}
+                  status={policeCertificateFileName ? (policeCertificateTranslated ? "Sa prevodom" : "Fali prevod") : "Nedostaje"}
+                >
+                  {(policeCertificateDataUrl || policeCertificateUrl) && (
                     <button
                       type="button"
                       onClick={() =>
-                        openDocumentPreview(
-                          "Sken biometrijskog pasoša",
-                          passportScanFileName || "Pasos.pdf",
-                          passportScanUrl,
-                          passportScanDataUrl,
-                          "passport"
-                        )
+                        openDocumentPreview("MUP uverenje", policeCertificateFileName, policeCertificateUrl, policeCertificateDataUrl, "documents")
                       }
-                      className="rounded-lg bg-ink px-3 py-1.5 text-xs font-semibold text-white"
+                      className={linkCls}
                     >
-                      Pregledaj pasoš
+                      Otvori
                     </button>
                   )}
-                  <label className="cursor-pointer rounded-lg border border-line-strong bg-white px-3 py-1.5 text-xs font-semibold text-ink hover:bg-surface-2">
-                    {uploadingDocType === "passport" ? "Otpremanje..." : "Otpremi pasoš"}
-                    <input
-                      type="file"
-                      accept=".pdf,.jpg,.jpeg,.png"
-                      className="hidden"
-                      onChange={(e) => handleAdminDocUpload(e.target.files?.[0], "passport")}
-                    />
-                  </label>
-                </div>
-              </div>
-            </div>
+                  <Upload busy={uploadingDocType === "policeCert"} onFile={(f) => handleAdminDocUpload(f, "policeCert")} label={policeCertificateFileName ? "Zameni" : "Okači"} />
+                  <Toggle checked={policeCertificateTranslated} onChange={setPoliceCertificateTranslated}>
+                    Prevod gotov
+                  </Toggle>
+                </DocRow>
+              </ul>
 
-            {/* 3. Paket programa, popust i jemac */}
-            <div className="rounded-xl border border-line bg-white p-4 space-y-4">
-              <h4 className="text-[15px] font-semibold text-ink">
-                Paket, popust i plaćanje III rate
-              </h4>
-              <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-3">
-                <Field label="Paket programa">
+              {documentsRejectionReason && !documentsApproved && (
+                <p className="mt-4 text-[13px] text-red-700">Razlog za dopunu: {documentsRejectionReason}</p>
+              )}
+              <div className="mt-5 flex flex-wrap items-center gap-2 border-t border-line pt-4">
+                <Button size="sm" variant="dark" onClick={() => handleVerifyDocumentsAction(true)}>
+                  {documentsApproved ? "Odobren" : "Odobri dosije"}
+                </Button>
+                <Button size="sm" variant="outline" onClick={rejectDocs}>
+                  Vrati na dopunu
+                </Button>
+              </div>
+            </Section>
+
+            <Section title="Posao i viza">
+              <ul className="divide-y divide-line">
+                <DocRow
+                  name="Job Offer"
+                  sub={selectedJobEmployer ? `${selectedJobTitle} — ${selectedJobEmployer}` : "Kandidat još nema posao"}
+                  state={offerSigned ? "done" : jobAccepted ? "wait" : selectedJobEmployer ? "current" : "locked"}
+                  status={
+                    offerSigned
+                      ? `Potpisan ${new Date(candidate.jobOfferSignedAt).toLocaleDateString("sr-RS")}`
+                      : jobAccepted
+                      ? "Čeka potpis kandidata"
+                      : "Kasnije"
+                  }
+                >
+                  {offerSigned && candidate.jobOfferSignature && (
+                    <span className="font-serif text-[15px] italic text-ink-2">{candidate.jobOfferSignature}</span>
+                  )}
+                </DocRow>
+                <DocRow
+                  name="DS-160 upitnik"
+                  sub={ds160St.isComplete ? "Popunjen" : ds160St.isStarted ? `${ds160St.filledCount} od ${ds160St.totalCount} polja` : "Nije počet"}
+                  state={ds160St.isComplete ? "done" : ds160St.isStarted ? "wait" : "current"}
+                  status={ds160St.isComplete ? "Popunjen" : ds160St.isStarted ? "U izradi" : "Nije počet"}
+                >
+                  <a href="/documents/UPITNIK_za_izradu_DS160_J1.docx" download="UPITNIK_za_izradu_DS160_J1.docx" className={linkCls}>
+                    Prazan upitnik (.docx)
+                  </a>
+                </DocRow>
+                <DocRow
+                  name="DS-2019"
+                  sub={ds2019Number ? `SEVIS ${ds2019Number}` : "Izdaje sponzor"}
+                  state={ds2019Status === "ISSUED" ? "done" : ds2019Status === "IN_PROGRESS" ? "wait" : "locked"}
+                  status={ds2019Status === "ISSUED" ? "Izdat" : ds2019Status === "IN_PROGRESS" ? "U izradi" : "Čeka II ratu"}
+                />
+                <DocRow name="J-1 viza" sub="Posle razgovora u ambasadi" state={hasVisa ? "done" : status === "departure" ? "wait" : "locked"} status={hasVisa ? "Odobrena" : "Kasnije"} />
+              </ul>
+
+              {ds160Entries.length > 0 && (
+                <details className="mt-5 border-t border-line pt-4">
+                  <summary className="cursor-pointer text-sm font-medium text-ink">Odgovori iz DS-160 ({ds160Entries.length})</summary>
+                  <dl className="mt-3 grid gap-x-8 sm:grid-cols-2">
+                    {ds160Entries.map(([k, v]) => (
+                      <div key={k} className="flex flex-col gap-0.5 border-b border-line py-2">
+                        <dt className="text-xs text-ink-3">{k}</dt>
+                        <dd className="break-words text-sm text-ink">{String(v || "—")}</dd>
+                      </div>
+                    ))}
+                  </dl>
+                </details>
+              )}
+            </Section>
+
+            <Section title="Obrasci agencije">
+              <div className="flex flex-wrap gap-x-5 gap-y-2">
+                <button type="button" onClick={() => openPrintableContractWindow({ id: candidate.id, email })} className={linkCls}>
+                  Ugovor za štampu
+                </button>
+                <a href="/documents/UPITNIK_za_izradu_DS160_J1.docx" download className={linkCls}>
+                  DS-160 upitnik (.docx)
+                </a>
+                <a href="/documents/Uplatnica_viziranje.docx" download="Uplatnica_viziranje.docx" className={linkCls}>
+                  Uplatnica za vizu (.docx)
+                </a>
+                <a href="/documents/Narudzbenica-avio-karte.pdf" target="_blank" rel="noreferrer" className={linkCls}>
+                  Narudžbenica avio karte
+                </a>
+                <a href="/documents/AA_Instrukcija_za_video_CV.pdf" download className={linkCls}>
+                  Uputstvo za video
+                </a>
+              </div>
+            </Section>
+          </div>
+        )}
+
+        {/* =================== UPLATE =================== */}
+        {activeTab === "pay" && (
+          <div className="space-y-4">
+            <dl className={`${cardCls} grid grid-cols-2 divide-line sm:grid-cols-4 sm:divide-x`}>
+              {[
+                ["Za uplatu", finalPrice, finalPrice * currentNbsRate, "text-ink"],
+                ["Popust", numDiscount, numDiscount * currentNbsRate, "text-emerald-700"],
+                ["Plaćeno", totalPaidEur, totalPaidRsd, "text-emerald-700"],
+                ["Preostalo", remainingEur, remainingRsd, remainingEur > 0 ? "text-ink" : "text-ink-3"],
+              ].map(([k, eur, rsd, tone]) => (
+                <div key={k} className="px-4 py-3.5 sm:px-5">
+                  <dt className="text-xs text-ink-3">{k}</dt>
+                  <dd className={`mt-0.5 text-lg font-semibold tabular-nums ${tone}`}>{formatEur(eur)}</dd>
+                  <dd className="text-xs tabular-nums text-ink-3">{formatRsd(rsd)}</dd>
+                </div>
+              ))}
+            </dl>
+
+            <Section
+              title="Uplate"
+              hint="Pri knjiženju se zaključava srednji kurs NBS tog dana i dinarski iznos."
+              aside={<span className="text-[13px] tabular-nums text-ink-3">NBS {Number(currentNbsRate).toFixed(4)}</span>}
+            >
+              <ul className="divide-y divide-line">
+                {(isFull
+                  ? [
+                      {
+                        num: "full",
+                        title: "Program u celosti",
+                        eur: finalPrice,
+                        paid: firstPaid,
+                        status: firstInstallmentStatus,
+                        paidRsd: candidate.fullPaymentPaidRsd,
+                        rate: candidate.fullPaymentExchangeRate,
+                        paidDate: candidate.fullPaymentPaidDate,
+                      },
+                    ]
+                  : [
+                      {
+                        num: 1,
+                        title: "I rata — uz ugovor",
+                        eur: r1Amount,
+                        paid: firstInstallmentApproved,
+                        status: firstInstallmentStatus,
+                        paidRsd: candidate.firstInstallmentPaidRsd,
+                        rate: candidate.firstInstallmentExchangeRate,
+                        paidDate: candidate.firstInstallmentPaidDate,
+                      },
+                      {
+                        num: 2,
+                        title: "II rata — uz Job Offer",
+                        eur: r2Amount,
+                        paid: secondInstallmentPaid,
+                        status: secondInstallmentStatus,
+                        paidRsd: candidate.secondInstallmentPaidRsd,
+                        rate: candidate.secondInstallmentExchangeRate,
+                        paidDate: candidate.secondInstallmentPaidDate,
+                      },
+                      {
+                        num: 3,
+                        title: paymentMethod === "now" ? "III rata — pred vizu" : "III rata — pred vizu ili PKZ",
+                        eur: r3Amount,
+                        paid: thirdInstallmentPaid,
+                        status: thirdInstallmentStatus,
+                        paidRsd: candidate.thirdInstallmentPaidRsd,
+                        rate: candidate.thirdInstallmentExchangeRate,
+                        paidDate: candidate.thirdInstallmentPaidDate,
+                      },
+                    ]
+                ).map((r) => {
+                  const rsd = r.paid && r.paidRsd ? r.paidRsd : Math.round(r.eur * currentNbsRate * 100) / 100;
+                  const st = r.paid ? "done" : r.status === "pending" ? "wait" : "current";
+                  return (
+                    <li key={r.num} className="flex flex-col gap-3 py-4 first:pt-0 last:pb-0 sm:flex-row sm:items-center sm:justify-between">
+                      <div className="flex min-w-0 gap-3.5">
+                        <TaskIcon state={st} className="mt-0.5" />
+                        <div className="min-w-0">
+                          <p className="text-[15px] font-medium text-ink">{r.title}</p>
+                          <p className="mt-0.5 text-[13px] text-ink-3">
+                            {r.paid
+                              ? `Proknjiženo ${r.paidDate || ""} · kurs ${Number(r.rate || currentNbsRate).toFixed(4)}`
+                              : r.status === "pending"
+                              ? "Kandidat je prijavio uplatu"
+                              : "Nije plaćeno"}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="flex items-center justify-between gap-4 pl-[2.125rem] sm:pl-0">
+                        <div className="text-right">
+                          <p className="text-[15px] font-semibold tabular-nums text-ink">{formatEur(r.eur)}</p>
+                          <p className="text-xs tabular-nums text-ink-3">{formatRsd(rsd)}</p>
+                        </div>
+                        {!r.paid && (
+                          <Button size="sm" variant={r.status === "pending" ? "dark" : "outline"} onClick={() => handleConfirmInstallmentAction(r.num)}>
+                            Proknjiži
+                          </Button>
+                        )}
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+              <div className="mt-5 flex flex-wrap items-center gap-3 border-t border-line pt-4">
+                <span className="text-[13px] text-ink-3">Status prve uplate ručno:</span>
+                <select
+                  value={firstPaid ? "paid" : firstInstallmentStatus}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setFirstInstallmentStatus(val);
+                    setFirstInstallmentApproved(val === "paid");
+                    if (isFull) setIsFullPaymentPaid(val === "paid");
+                  }}
+                  className={`${FIELD_CLS} max-w-56 py-1.5`}
+                >
+                  <option value="unpaid">Nije uplaćeno</option>
+                  <option value="pending">Prijavljena</option>
+                  <option value="paid">Plaćeno</option>
+                </select>
+              </div>
+            </Section>
+
+            <Section title="Plan plaćanja" hint="Iznosi rata mogu da se prilagode ovom kandidatu.">
+              <div className="grid items-end gap-3 sm:grid-cols-2 md:grid-cols-4">
+                <Field label="Model plaćanja">
+                  <select value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value)} className={FIELD_CLS}>
+                    <option value="now">Jednokratno, u celosti</option>
+                    <option value="installments">Na rate (I, II i III)</option>
+                    <option value="later">PKZ, plaćanje kroz zaradu</option>
+                  </select>
+                </Field>
+                {paymentMethod !== "now" && (
+                  <>
+                    <Field label="I rata (€)">
+                      <input type="number" min="0" step="10" value={firstInstallmentAmount} onChange={(e) => setFirstInstallmentAmount(Number(e.target.value) || 0)} className={FIELD_CLS} />
+                    </Field>
+                    <Field label="II rata (€)">
+                      <input type="number" min="0" step="10" value={secondInstallmentAmount} onChange={(e) => setSecondInstallmentAmount(Number(e.target.value) || 0)} className={FIELD_CLS} />
+                    </Field>
+                    <Field label="III rata (€)">
+                      <div className="flex gap-1.5">
+                        <input type="number" min="0" step="10" value={thirdInstallmentAmount} onChange={(e) => setThirdInstallmentAmount(Number(e.target.value) || 0)} className={FIELD_CLS} />
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const balanced = Math.max(0, finalPrice - Number(firstInstallmentAmount || 0) - Number(secondInstallmentAmount || 0));
+                            setThirdInstallmentAmount(balanced);
+                            showToast(`III rata je podešena na ${balanced} €, da zbir odgovara ceni.`);
+                          }}
+                          title="Izračunaj III ratu"
+                          className="shrink-0 rounded-lg border border-line-strong px-2.5 text-xs font-medium text-ink hover:bg-surface"
+                        >
+                          Auto
+                        </button>
+                      </div>
+                    </Field>
+                  </>
+                )}
+              </div>
+              {paymentMethod !== "now" && (
+                <p className="mt-3 text-[13px] text-ink-3">
+                  Zbir rata {formatEur(firstInstallmentAmount + secondInstallmentAmount + thirdInstallmentAmount)}
+                  {firstInstallmentAmount + secondInstallmentAmount + thirdInstallmentAmount === finalPrice ? (
+                    <span className="text-emerald-700"> — odgovara ceni</span>
+                  ) : (
+                    <span className="text-amber-700">
+                      {" "}
+                      — razlika {formatEur(finalPrice - (firstInstallmentAmount + secondInstallmentAmount + thirdInstallmentAmount))}
+                    </span>
+                  )}
+                </p>
+              )}
+            </Section>
+
+            <Section title="Paket i popust">
+              <div className="grid gap-3.5 sm:grid-cols-3">
+                <Field label="Paket">
                   <select value={packageId} onChange={(e) => setPackageId(e.target.value)} className={FIELD_CLS}>
                     {PROGRAM_PACKAGES.map((p) => (
                       <option key={p.id} value={p.id}>
@@ -1231,7 +1482,7 @@ export default function CandidateApplicationModal({ candidate, onSave, onClose }
                     ))}
                   </select>
                 </Field>
-                <Field label="Promocija / Popust">
+                <Field label="Promocija">
                   <select
                     value={discountId}
                     onChange={(e) => {
@@ -1251,10 +1502,10 @@ export default function CandidateApplicationModal({ candidate, onSave, onClose }
                     }}
                     className={FIELD_CLS}
                   >
-                    <option value="none">Bez promocije / Ručni unos</option>
+                    <option value="none">Bez promocije / ručno</option>
                     {promotions.map((p) => (
                       <option key={p.id} value={p.id}>
-                        {p.title} (-{p.amount} €)
+                        {p.title} (−{p.amount} €)
                       </option>
                     ))}
                   </select>
@@ -1262,1380 +1513,564 @@ export default function CandidateApplicationModal({ candidate, onSave, onClose }
                 <Field label="Iznos popusta (€)">
                   <input type="number" min="0" max={basePrice} value={discount} onChange={(e) => setDiscount(e.target.value)} className={FIELD_CLS} />
                 </Field>
-              </div>
-
-              <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2">
-                <Field label="Model plaćanja završne (III) rate">
-                  <select value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value)} className={FIELD_CLS}>
-                    <option value="now">Standardno plaćanje (pre viziranja u celosti)</option>
-                    <option value="installments">Plaćanje na rate / PKZ (uz jemca i 2 menice)</option>
-                    <option value="later">Odloženo plaćanje u SAD — PKZ (uz jemca i 2 menice)</option>
+                <Field label="Napomena o popustu">
+                  <input value={discountNote} onChange={(e) => setDiscountNote(e.target.value)} placeholder="npr. Rana prijava" className={FIELD_CLS} />
+                </Field>
+                <Field label="Obračun popusta">
+                  <select value={discountTiming} onChange={(e) => setDiscountTiming(e.target.value)} className={FIELD_CLS}>
+                    <option value="immediate">Odmah umanjuje cenu</option>
+                    <option value="end">Na poslednjoj rati</option>
                   </select>
                 </Field>
-                <Field label="Napomena o popustu">
-                  <input value={discountNote} onChange={(e) => setDiscountNote(e.target.value)} placeholder="npr. Rana prijava..." className={FIELD_CLS} />
+                <div className="flex items-end pb-2.5">
+                  <Toggle checked={discountVerified} onChange={setDiscountVerified}>
+                    Uslov popusta proveren
+                  </Toggle>
+                </div>
+                <Field label="Preporučio ga je">
+                  <input value={referredBy} onChange={(e) => setReferredBy(e.target.value)} placeholder="Kod ili ime" className={FIELD_CLS} />
                 </Field>
+                <Field label="Šifra grupe">
+                  <input value={groupCode} onChange={(e) => setGroupCode(e.target.value)} placeholder="BG-SUMMER-2026" className={FIELD_CLS} />
+                </Field>
+                <div className="flex flex-col justify-end pb-2.5 text-[13px] text-ink-3">
+                  Kod kandidata za preporuke: <span className="font-medium tabular-nums text-ink">{candidate.referralCode || "—"}</span>
+                </div>
               </div>
 
               {(paymentMethod === "later" || paymentMethod === "installments" || guarantorName) && (
-                <div className="rounded-lg border border-line bg-white p-3.5 space-y-3">
-                  <p className="text-xs font-semibold text-amber-700">
-                    Podaci o jemcu i menicama (Obavezno za PKZ / odloženo plaćanje III rate)
-                  </p>
-                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-                    <Field label="Ime i prezime jemca">
+                <div className="mt-5 border-t border-line pt-4">
+                  <p className="mb-3 text-sm font-medium text-ink">Jemac (za PKZ i odloženo plaćanje)</p>
+                  <div className="grid gap-3 sm:grid-cols-3">
+                    <Field label="Ime i prezime">
                       <input value={guarantorName} onChange={(e) => setGuarantorName(e.target.value)} className={FIELD_CLS} />
                     </Field>
-                    <Field label="Broj lične karte jemca">
+                    <Field label="Broj lične karte">
                       <input value={guarantorIdCard} onChange={(e) => setGuarantorIdCard(e.target.value)} className={FIELD_CLS} />
                     </Field>
-                    <Field label="JMBG jemca">
+                    <Field label="JMBG">
                       <input value={guarantorJmbg} onChange={(e) => setGuarantorJmbg(e.target.value)} maxLength={13} className={`${FIELD_CLS} tabular-nums`} />
                     </Field>
                   </div>
                 </div>
               )}
-            </div>
-          </div>
-        )}
+            </Section>
 
-        {/* ================================================================ */}
-        {/* TAB 2: KORAK 1 — PROFIL & DOKUMENTA (CV, Video, Uverenja)        */}
-        {/* ================================================================ */}
-        {activeTab === "step1_docs" && (
-          <div className="space-y-5">
-            {/* 1. CV Builder i Video prezentacija */}
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-              <div className="rounded-xl border border-line bg-white p-4 space-y-3">
-                <div className="flex items-center justify-between">
-                  <h4 className="text-[15px] font-semibold text-ink">
-                    CV
-                  </h4>
-                  <button
-                    type="button"
-                    onClick={() => setShowProfileBuilder(true)}
-                    className="rounded-lg border border-line-strong bg-white px-3 py-1 text-xs font-semibold text-ink transition-colors hover:bg-surface"
-                  >
-                    CV builder
-                  </button>
-                </div>
-
-                <div className="rounded-lg border border-line bg-surface p-3">
-                  {cvFileName ? (
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="truncate text-xs font-semibold text-ink">{cvFileName}</span>
-                      {(cvDataUrl || cvUrl) && (
-                        <button
-                          type="button"
-                          onClick={() =>
-                            openDocumentPreview("CV Biografija", cvFileName, cvUrl, cvDataUrl, "documents")
-                          }
-                          className="rounded-lg bg-ink px-2.5 py-1 text-xs font-semibold text-white"
-                        >
-                          Otvori CV
-                        </button>
-                      )}
-                    </div>
-                  ) : (
-                    <p className="text-xs text-ink-3">CV fajl još nije otpremljen.</p>
-                  )}
-                  <div className="mt-2 pt-2 border-t border-line">
-                    <label className="cursor-pointer text-xs font-semibold text-ink hover:underline">
-                      {uploadingDocType === "cv" ? "Otpremanje..." : "Otpremi CV"}
-                      <input
-                        type="file"
-                        accept=".pdf,.doc,.docx"
-                        className="hidden"
-                        onChange={(e) => handleAdminDocUpload(e.target.files?.[0], "cv")}
-                      />
-                    </label>
-                  </div>
-                </div>
-              </div>
-
-              <div className="rounded-xl border border-line bg-white p-4 space-y-3">
-                <h4 className="text-[15px] font-semibold text-ink">
-                  Video prezentacija (60 s)
-                </h4>
-                <Field label="YouTube link">
-                  <input
-                    type="url"
-                    value={youtubeUrl}
-                    onChange={(e) => setYoutubeUrl(e.target.value)}
-                    placeholder="https://www.youtube.com/watch?v=..."
-                    className={FIELD_CLS}
-                  />
-                </Field>
-                {youtubeUrl && (
-                  <a
-                    href={youtubeUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="inline-flex items-center gap-1.5 text-xs font-semibold text-ink hover:underline"
-                  >
-                    Otvori video
-                  </a>
-                )}
-              </div>
-            </div>
-
-            {/* 2. Uverenje sa fakulteta i Uverenje iz MUP-a */}
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-              {/* Uverenje sa fakulteta */}
-              <div className="rounded-xl border border-line bg-white p-4 space-y-3">
-                <div className="flex items-center justify-between">
-                  <h4 className="text-[15px] font-semibold text-ink">
-                    Uverenje o studiranju
-                  </h4>
-                  <span
-                    className={`rounded-full px-3 py-1 text-xs font-medium ${
-                      facultyCertFileName ? "bg-surface-2 text-emerald-700" : "bg-surface-2 text-amber-700"
-                    }`}
-                  >
-                    {facultyCertFileName ? "Otpremljeno" : "Nedostaje"}
-                  </span>
-                </div>
-
-                <div className="rounded-lg border border-line bg-surface p-3">
-                  {facultyCertFileName ? (
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="truncate text-xs font-semibold text-ink">
-                        {facultyCertFileName}
-                      </span>
-                      {(facultyCertDataUrl || facultyCertUrl) && (
-                        <button
-                          type="button"
-                          onClick={() =>
-                            openDocumentPreview(
-                              "Uverenje sa fakulteta",
-                              facultyCertFileName,
-                              facultyCertUrl,
-                              facultyCertDataUrl,
-                              "documents"
-                            )
-                          }
-                          className="rounded-lg bg-ink px-2.5 py-1 text-xs font-semibold text-white"
-                        >
-                          Otvori
-                        </button>
-                      )}
-                    </div>
-                  ) : (
-                    <p className="text-xs text-ink-3">Uverenje sa fakulteta nije otpremljeno.</p>
-                  )}
-
-                  <div className="mt-2.5 flex flex-wrap items-center justify-between gap-2 border-t border-line pt-2">
-                    <label className="cursor-pointer text-xs font-semibold text-ink hover:underline">
-                      {uploadingDocType === "facultyCert" ? "Otpremanje..." : "Otpremi uverenje"}
-                      <input
-                        type="file"
-                        accept=".pdf,.jpg,.jpeg,.png"
-                        className="hidden"
-                        onChange={(e) => handleAdminDocUpload(e.target.files?.[0], "facultyCert")}
-                      />
-                    </label>
-                    <label className="flex items-center gap-1.5 text-xs font-semibold text-ink cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={facultyCertAiTranslation}
-                        onChange={(e) => setFacultyCertAiTranslation(e.target.checked)}
-                        className="h-3.5 w-3.5 rounded"
-                      />
-                      Sudski prevod gotov
-                    </label>
-                  </div>
-                </div>
-              </div>
-
-              {/* Uverenje iz MUP-a */}
-              <div className="rounded-xl border border-line bg-white p-4 space-y-3">
-                <div className="flex items-center justify-between">
-                  <h4 className="text-[15px] font-semibold text-ink">
-                    Uverenje o nekažnjavanju (MUP)
-                  </h4>
-                  <span
-                    className={`rounded-full px-3 py-1 text-xs font-medium ${
-                      policeCertificateFileName ? "bg-surface-2 text-emerald-700" : "bg-surface-2 text-amber-700"
-                    }`}
-                  >
-                    {policeCertificateFileName ? "Otpremljeno" : "Nedostaje"}
-                  </span>
-                </div>
-
-                <div className="rounded-lg border border-line bg-surface p-3">
-                  {policeCertificateFileName ? (
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="truncate text-xs font-semibold text-ink">
-                        {policeCertificateFileName}
-                      </span>
-                      {(policeCertificateDataUrl || policeCertificateUrl) && (
-                        <button
-                          type="button"
-                          onClick={() =>
-                            openDocumentPreview(
-                              "Uverenje iz MUP-a o nekažnjavanju",
-                              policeCertificateFileName,
-                              policeCertificateUrl,
-                              policeCertificateDataUrl,
-                              "documents"
-                            )
-                          }
-                          className="rounded-lg bg-ink px-2.5 py-1 text-xs font-semibold text-white"
-                        >
-                          Otvori
-                        </button>
-                      )}
-                    </div>
-                  ) : (
-                    <p className="text-xs text-ink-3">Uverenje iz MUP-a nije otpremljeno.</p>
-                  )}
-
-                  <div className="mt-2.5 flex flex-wrap items-center justify-between gap-2 border-t border-line pt-2">
-                    <label className="cursor-pointer text-xs font-semibold text-ink hover:underline">
-                      {uploadingDocType === "policeCert" ? "Otpremanje..." : "Otpremi uverenje"}
-                      <input
-                        type="file"
-                        accept=".pdf,.jpg,.jpeg,.png"
-                        className="hidden"
-                        onChange={(e) => handleAdminDocUpload(e.target.files?.[0], "policeCert")}
-                      />
-                    </label>
-                    <label className="flex items-center gap-1.5 text-xs font-semibold text-ink cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={policeCertificateTranslated}
-                        onChange={(e) => setPoliceCertificateTranslated(e.target.checked)}
-                        className="h-3.5 w-3.5 rounded"
-                      />
-                      Sudski prevod gotov
-                    </label>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Gate za odobravanje kompletnog dosijea */}
-            <div
-              className={`rounded-xl border p-4 flex flex-wrap items-center justify-between gap-4 ${
-                documentsApproved
-                  ? "border-line bg-white"
-                  : documentsVerificationStatus === "rejected"
-                  ? "border-red-200 bg-white"
-                  : "border-line bg-surface"
-              }`}
+            <Section
+              title="Računi"
+              hint="Svaka proknjižena uplata automatski dobija račun."
+              aside={
+                <Button size="sm" variant="outline" onClick={() => setShowCreateInvoiceModal(true)}>
+                  <PlusIcon className="h-4 w-4" /> Izdaj račun
+                </Button>
+              }
             >
-              <div>
-                <div className="flex items-center gap-2">
-                  <h4 className="text-[15px] font-semibold text-ink">
-                    Odluka o dokumentima
-                  </h4>
-                  <span
-                    className={`rounded-full px-3 py-1 text-xs font-medium ${
-                      documentsApproved
-                        ? "bg-surface-2 text-emerald-700"
-                        : documentsVerificationStatus === "rejected"
-                        ? "bg-surface-2 text-red-700"
-                        : "bg-surface-2 text-ink"
-                    }`}
-                  >
-                    {documentsApproved
-                      ? "Odobrena"
-                      : documentsVerificationStatus === "rejected"
-                      ? "Vraćeno na dopunu"
-                      : "Čeka pregled"}
-                  </span>
-                </div>
-                <p className="text-xs text-ink-2 mt-1">
-                  Kad su sva dokumenta pregledana i odobrena, kandidat prelazi na Korak 2: Posao i ponuda.
-                </p>
-                {documentsRejectionReason && !documentsApproved && (
-                  <p className="mt-2 rounded-lg bg-surface-2 px-3 py-1.5 text-xs font-semibold text-red-700">
-                    Razlog za dopunu: {documentsRejectionReason}
-                  </p>
-                )}
-              </div>
-
-              <div className="flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  onClick={() => handleVerifyDocumentsAction(true)}
-                  className="rounded-lg bg-ink px-4 py-2 text-xs font-bold text-white hover:bg-ink"
-                >
-                  Odobri dokumenta
-                </button>
-                <button
-                  type="button"
-                  onClick={() =>
-                    setRejectionModal({
-                      type: "documents",
-                      title: "Vraćanje dokumentacije na dopunu uz obrazloženje",
-                      reason: documentsRejectionReason || "",
-                    })
-                  }
-                  className="rounded-lg border border-red-300 bg-white px-3.5 py-2 text-xs font-semibold text-red-700 hover:border-red-200 bg-white"
-                >
-                  Vrati na dopunu
-                </button>
-              </div>
-            </div>
+              {candidateInvoices.length === 0 ? (
+                <p className="text-sm text-ink-3">Još nema računa.</p>
+              ) : (
+                <ul className="divide-y divide-line">
+                  {candidateInvoices.map((inv) => {
+                    const st = PAYMENT_STATUSES[inv.status] || PAYMENT_STATUSES.PENDING;
+                    const paid = inv.status === "PAID";
+                    return (
+                      <li key={inv.id} className="flex flex-col gap-2 py-3 first:pt-0 last:pb-0 sm:flex-row sm:items-center sm:justify-between">
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-medium text-ink">{inv.purpose}</p>
+                          <p className="text-[13px] tabular-nums text-ink-3">
+                            {inv.invoiceNumber} · {formatRsd(inv.totalRsd)}
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-4">
+                          <span className="text-sm font-semibold tabular-nums text-ink">
+                            {inv.originalAmount.toFixed(2)} {inv.currency}
+                          </span>
+                          <StatusText state={paid ? "done" : inv.status === "CANCELLED" ? "locked" : "wait"}>{st.label}</StatusText>
+                          {!paid && inv.status !== "CANCELLED" && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                updateInvoiceStatus(inv.id, "PAID");
+                                refreshCandidateInvoices();
+                              }}
+                              className={linkCls}
+                            >
+                              Proknjiži
+                            </button>
+                          )}
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </Section>
           </div>
         )}
 
-        {/* ================================================================ */}
-        {/* TAB 3: KORAK 2 — POSAO & PONUDA (Priprema, Job Offer, II rata)   */}
-        {/* ================================================================ */}
-        {activeTab === "step2_job" && (() => {
-          const allCatalogJobs = getJobs();
-          const offeredCount = offerAllJobs ? allCatalogJobs.length : offeredJobIds.length;
+        {/* =================== POSAO =================== */}
+        {activeTab === "job" &&
+          (() => {
+            const allCatalogJobs = getJobs();
+            const offeredCount = offerAllJobs ? allCatalogJobs.length : offeredJobIds.length;
+            const toggleJobOffer = (jobId) =>
+              setOfferedJobIds((prev) => (prev.includes(jobId) ? prev.filter((id) => id !== jobId) : [...prev, jobId]));
+            const saveJob = (overrides, msg) => {
+              onSave(buildUpdatedCandidate(overrides), { keepOpen: true });
+              showToast(msg);
+            };
 
-          const toggleJobOffer = (jobId) => {
-            setOfferedJobIds((prev) =>
-              prev.includes(jobId) ? prev.filter((id) => id !== jobId) : [...prev, jobId]
-            );
-          };
-
-          return (
-            <div className="space-y-5">
-              {/* 1. Dodeljivanje ponude poslova iz Baze poslova */}
-              <div className="rounded-xl border border-line bg-white p-4 space-y-4">
-                <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
-                  <div>
-                    <h4 className="text-[15px] font-semibold text-ink">
-                      Poslovi koje kandidat vidi u svom nalogu
-                    </h4>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="rounded-lg bg-surface border border-line px-3 py-1 text-xs font-medium text-ink">
-                      Ponuđeno: {offeredCount}
-                    </span>
-                  </div>
-                </div>
-
-                <div className="space-y-3">
-                  <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-line bg-surface p-3 text-xs">
-                    <label className="flex items-center gap-2 cursor-pointer font-semibold text-ink">
-                      <input
-                        type="checkbox"
-                        checked={offerAllJobs}
-                        onChange={(e) => setOfferAllJobs(e.target.checked)}
-                        className="h-4 w-4 rounded"
-                      />
-                      <span>Ponudi sve poslove iz baze</span>
-                    </label>
-
-                    {!offerAllJobs && (
-                      <div className="flex items-center gap-2">
-                        <button
-                          type="button"
-                          onClick={() => setOfferedJobIds(allCatalogJobs.map((j) => j.id))}
-                          className="rounded-lg border border-line bg-white px-2.5 py-1 text-xs font-semibold text-ink hover:bg-surface-2"
-                        >
-                          Označi sve
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setOfferedJobIds([])}
-                          className="rounded-lg border border-line-strong bg-white px-2.5 py-1 text-xs font-semibold text-ink-2 hover:bg-surface-2"
-                        >
-                          Poništi sve
-                        </button>
-                      </div>
-                    )}
-                  </div>
-
-                  {!offerAllJobs && (
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 max-h-60 overflow-y-auto p-1 border border-line rounded-xl bg-surface">
-                      {allCatalogJobs.map((job) => {
-                        const isOffered = offeredJobIds.includes(job.id);
-                        return (
-                          <div
-                            key={job.id}
-                            onClick={() => toggleJobOffer(job.id)}
-                            className={`flex items-start gap-2.5 rounded-lg border p-2.5 cursor-pointer text-xs transition-colors ${
-                              isOffered
-                                ? "border-line-strong bg-surface"
-                                : "border-line bg-white hover:border-line-strong"
-                            }`}
-                          >
-                            <input
-                              type="checkbox"
-                              checked={isOffered}
-                              onChange={() => {}}
-                              className="mt-0.5 h-4 w-4 rounded"
-                            />
-                            <div className="min-w-0 flex-1">
-                              <p className="font-bold text-ink truncate">{job.title}</p>
-                              <p className="text-xs text-ink-2 truncate">{job.employer}, {job.city}</p>
-                              <p className="text-2xs font-semibold text-amber-700 mt-0.5">{job.wage}</p>
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* 2. Izbor kandidata & Upravljanje tokom intervjua sa poslodavcem */}
-              <div className="rounded-xl border border-line bg-white p-4 space-y-4">
-                <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
-                  <div>
-                    <h4 className="text-[15px] font-semibold text-ink">
-                      Izabrani posao i razgovor sa poslodavcem
-                    </h4>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span
-                      className={`rounded-full px-3 py-1 text-xs font-medium ${
-                        jobApplicationStatus === "ACCEPTED" || (hasJob && !["SCHEDULED", "APPLIED", "NO_SLOTS", "REJECTED"].includes(jobApplicationStatus))
-                          ? "bg-surface-2 text-emerald-700"
-                          : jobApplicationStatus === "SCHEDULED"
-                          ? "bg-surface-2 text-ink"
-                          : jobApplicationStatus === "APPLIED"
-                          ? "bg-surface-2 text-amber-700"
-                          : jobApplicationStatus === "NO_SLOTS" || jobApplicationStatus === "REJECTED"
-                          ? "bg-surface-2 text-red-700"
-                          : "bg-surface-2 text-ink-3"
-                      }`}
-                    >
-                      {jobApplicationStatus === "ACCEPTED" || (hasJob && !["SCHEDULED", "APPLIED", "NO_SLOTS", "REJECTED"].includes(jobApplicationStatus))
-                        ? "Job offer potvrđen"
-                        : jobApplicationStatus === "SCHEDULED"
-                        ? "Intervju zakazan"
-                        : jobApplicationStatus === "APPLIED"
-                        ? "Prijava poslata, čeka termin"
-                        : jobApplicationStatus === "NO_SLOTS"
-                        ? "Nema slobodnih termina"
-                        : jobApplicationStatus === "REJECTED"
-                        ? "Poslodavac odbio kandidata"
-                        : "Nije izabran posao"}
-                    </span>
-                  </div>
-                </div>
-
-                {/* Brzi izbor ili izmena posla iz kataloga */}
-                <Field label="Pozicija iz baze poslova">
-                  <select
-                    value=""
-                    onChange={(e) => {
-                      const job = allCatalogJobs.find((j) => String(j.id) === String(e.target.value));
-                      if (job) {
-                        setSelectedJobTitle(job.title);
-                        setSelectedJobEmployer(job.employer);
-                        setSelectedJobCity(job.city);
-                        setSelectedJobWage(job.wage);
-                        setSelectedJobHousing(job.housing);
-                        setJobApplicationStatus("APPLIED");
+            return (
+              <div className="space-y-4">
+                <Section
+                  title="Izabrani posao"
+                  aside={
+                    <StatusText
+                      state={
+                        jobAccepted ? "done" : jobApplicationStatus === "NO_SLOTS" || jobApplicationStatus === "REJECTED" ? "danger" : jobApplicationStatus ? "wait" : "current"
                       }
-                    }}
-                    className={FIELD_CLS}
-                  >
-                    <option value="">Izaberi posao iz baze</option>
-                    {allCatalogJobs.map((j) => (
-                      <option key={j.id} value={j.id}>
-                        {j.employer}: {j.title} ({j.city}, {j.wage})
-                      </option>
-                    ))}
-                  </select>
-                </Field>
-
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-                  <Field label="Poslodavac">
-                    <input
-                      value={selectedJobEmployer}
-                      onChange={(e) => setSelectedJobEmployer(e.target.value)}
-                      placeholder="npr. Grand Hotel Mackinac"
+                    >
+                      {jobAccepted
+                        ? offerSigned
+                          ? "Job Offer potpisan"
+                          : "Prihvaćen"
+                        : jobApplicationStatus === "SCHEDULED"
+                        ? "Razgovor zakazan"
+                        : jobApplicationStatus === "APPLIED"
+                        ? "Čeka termin"
+                        : jobApplicationStatus === "NO_SLOTS"
+                        ? "Nema termina"
+                        : jobApplicationStatus === "REJECTED"
+                        ? "Odbijen"
+                        : "Nije izabran"}
+                    </StatusText>
+                  }
+                >
+                  <Field label="Izaberi iz baze poslova">
+                    <select
+                      value=""
+                      onChange={(e) => {
+                        const job = allCatalogJobs.find((j) => String(j.id) === String(e.target.value));
+                        if (job) {
+                          setSelectedJobTitle(job.title);
+                          setSelectedJobEmployer(job.employer);
+                          setSelectedJobCity(job.city);
+                          setSelectedJobWage(job.wage);
+                          setSelectedJobHousing(job.housing);
+                          setJobApplicationStatus("APPLIED");
+                        }
+                      }}
                       className={FIELD_CLS}
-                    />
+                    >
+                      <option value="">—</option>
+                      {allCatalogJobs.map((j) => (
+                        <option key={j.id} value={j.id}>
+                          {j.employer}: {j.title} ({j.city}, {j.wage})
+                        </option>
+                      ))}
+                    </select>
                   </Field>
-                  <Field label="Pozicija">
-                    <input
-                      value={selectedJobTitle}
-                      onChange={(e) => setSelectedJobTitle(e.target.value)}
-                      placeholder="npr. Spasilac na bazenu / Server"
-                      className={FIELD_CLS}
-                    />
-                  </Field>
-                  <Field label="Mesto">
-                    <input
-                      value={selectedJobCity}
-                      onChange={(e) => setSelectedJobCity(e.target.value)}
-                      placeholder="npr. Ocean City, MD"
-                      className={FIELD_CLS}
-                    />
-                  </Field>
-                  <Field label="Satnica (USD)">
-                    <input
-                      value={selectedJobWage}
-                      onChange={(e) => setSelectedJobWage(e.target.value)}
-                      placeholder="npr. $16.50 / sat"
-                      className={FIELD_CLS}
-                    />
-                  </Field>
-                  <Field label="Smeštaj">
-                    <input
-                      value={selectedJobHousing}
-                      onChange={(e) => setSelectedJobHousing(e.target.value)}
-                      placeholder="npr. Obezbeđen smeštaj ($110/ned)"
-                      className={FIELD_CLS}
-                    />
-                  </Field>
-                  <div className="flex items-end pb-1">
-                    <label className="flex items-center gap-2 text-xs font-semibold text-ink cursor-pointer">
-                      <input
-                        type="checkbox"
+                  <div className="mt-3.5 grid gap-3.5 sm:grid-cols-3">
+                    <Field label="Poslodavac">
+                      <input value={selectedJobEmployer} onChange={(e) => setSelectedJobEmployer(e.target.value)} className={FIELD_CLS} />
+                    </Field>
+                    <Field label="Pozicija">
+                      <input value={selectedJobTitle} onChange={(e) => setSelectedJobTitle(e.target.value)} className={FIELD_CLS} />
+                    </Field>
+                    <Field label="Mesto">
+                      <input value={selectedJobCity} onChange={(e) => setSelectedJobCity(e.target.value)} className={FIELD_CLS} />
+                    </Field>
+                    <Field label="Satnica">
+                      <input value={selectedJobWage} onChange={(e) => setSelectedJobWage(e.target.value)} placeholder="$16.50 / sat" className={FIELD_CLS} />
+                    </Field>
+                    <Field label="Smeštaj">
+                      <input value={selectedJobHousing} onChange={(e) => setSelectedJobHousing(e.target.value)} className={FIELD_CLS} />
+                    </Field>
+                    <div className="flex items-end pb-2.5">
+                      <Toggle
                         checked={hasJob}
-                        onChange={(e) => {
-                          setHasJob(e.target.checked);
-                          if (e.target.checked) setJobApplicationStatus("ACCEPTED");
+                        onChange={(v) => {
+                          setHasJob(v);
+                          if (v) setJobApplicationStatus("ACCEPTED");
                         }}
-                        className="h-4 w-4 rounded"
-                      />
-                      Job offer potvrđen
-                    </label>
+                      >
+                        Job Offer potvrđen
+                      </Toggle>
+                    </div>
                   </div>
-                </div>
+                  {offerSigned && (
+                    <p className="mt-4 border-t border-line pt-3 text-[13px] text-ink-3">
+                      Kandidat je potpisao Job Offer {new Date(candidate.jobOfferSignedAt).toLocaleDateString("sr-RS")}
+                      {candidate.jobOfferSignature ? ` kao „${candidate.jobOfferSignature}“` : ""}.
+                    </p>
+                  )}
+                </Section>
 
-                {/* Sekcija: Upravljanje tokom intervjua i realnim ishodima */}
-                <div className="rounded-2xl border border-line bg-white p-5 space-y-3 sm:p-6">
-                  <h5 className="text-[13px] font-bold text-ink-2">
-                    Razgovor sa poslodavcem
-                  </h5>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <Section title="Razgovor sa poslodavcem">
+                  <div className="grid gap-3.5 sm:grid-cols-3">
                     <Field label="Termin">
-                      <input
-                        type="datetime-local"
-                        value={interviewScheduledAt}
-                        onChange={(e) => setInterviewScheduledAt(e.target.value)}
-                        className={FIELD_CLS}
-                      />
+                      <input type="datetime-local" value={interviewScheduledAt} onChange={(e) => setInterviewScheduledAt(e.target.value)} className={FIELD_CLS} />
                     </Field>
                     <Field label="Format">
-                      <select
-                        value={interviewType}
-                        onChange={(e) => setInterviewType(e.target.value)}
-                        className={FIELD_CLS}
-                      >
+                      <select value={interviewType} onChange={(e) => setInterviewType(e.target.value)} className={FIELD_CLS}>
                         <option value="ONLINE">Online</option>
                         <option value="IN_PERSON">Uživo</option>
                       </select>
                     </Field>
                     <Field label="Link ili adresa">
-                      <input
-                        value={interviewLink}
-                        onChange={(e) => setInterviewLink(e.target.value)}
-                        placeholder="https://meet.google.com/... ili adresa"
-                        className={FIELD_CLS}
-                      />
+                      <input value={interviewLink} onChange={(e) => setInterviewLink(e.target.value)} placeholder="https://meet.google.com/…" className={FIELD_CLS} />
                     </Field>
                   </div>
-
-                  <Field label="Poruka kandidatu">
-                    <input
-                      value={interviewNote}
-                      onChange={(e) => setInterviewNote(e.target.value)}
-                      placeholder="Uputstvo za razgovor ili razlog odbijanja"
-                      className={FIELD_CLS}
-                    />
-                  </Field>
-
-                  {/* Dugmad za promenu statusa (Dvosmerni realni slučajevi sa instant čuvanjem) */}
-                  <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-line">
-                    <button
-                      type="button"
+                  <div className="mt-3.5">
+                    <Field label="Poruka kandidatu">
+                      <input value={interviewNote} onChange={(e) => setInterviewNote(e.target.value)} placeholder="Uputstvo za razgovor ili razlog odbijanja" className={FIELD_CLS} />
+                    </Field>
+                  </div>
+                  <div className="mt-5 flex flex-wrap gap-2 border-t border-line pt-4">
+                    <Button
+                      size="sm"
+                      variant="dark"
                       onClick={() => {
                         if (!interviewScheduledAt) {
-                          alert("Unesi datum i vreme razgovora.");
+                          showToast("Unesi datum i vreme razgovora.");
                           return;
                         }
                         setJobApplicationStatus("SCHEDULED");
                         setHasJob(false);
-                        const updated = buildUpdatedCandidate({
-                          jobApplicationStatus: "SCHEDULED",
-                          interviewScheduledAt,
-                          interviewType,
-                          interviewLink,
-                          interviewNote,
-                          hasJob: false,
-                        });
-                        onSave(updated, { keepOpen: true });
-                        setAdminToast("Razgovor je zakazan.");
-                        setTimeout(() => setAdminToast(""), 4000);
+                        saveJob(
+                          { jobApplicationStatus: "SCHEDULED", interviewScheduledAt, interviewType, interviewLink, interviewNote, hasJob: false },
+                          "Razgovor je zakazan. Kandidat ga vidi u svom nalogu."
+                        );
                       }}
-                      className="rounded-lg bg-ink px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-neutral-950"
                     >
                       Zakaži razgovor
-                    </button>
-
-                    <button
-                      type="button"
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="dark"
+                      onClick={() => {
+                        setJobApplicationStatus("ACCEPTED");
+                        setHasJob(true);
+                        saveJob({ jobApplicationStatus: "ACCEPTED", hasJob: true }, "Poslodavac je prihvatio kandidata. Kandidat sada potpisuje Job Offer.");
+                      }}
+                    >
+                      Prihvaćen
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
                       onClick={() => {
                         const note = interviewNote || "Poslodavac trenutno nema slobodnih termina. Izaberi drugi posao iz baze.";
                         setJobApplicationStatus("NO_SLOTS");
                         setHasJob(false);
                         if (!interviewNote) setInterviewNote(note);
-                        const updated = buildUpdatedCandidate({
-                          jobApplicationStatus: "NO_SLOTS",
-                          interviewNote: note,
-                          hasJob: false,
-                        });
-                        onSave(updated, { keepOpen: true });
-                        setAdminToast("Evidentirano: nema termina. Kandidat je obavešten.");
-                        setTimeout(() => setAdminToast(""), 4000);
+                        saveJob({ jobApplicationStatus: "NO_SLOTS", interviewNote: note, hasJob: false }, "Evidentirano: nema termina. Kandidat je obavešten.");
                       }}
-                      className="rounded-lg border border-line bg-white px-3.5 py-1.5 text-xs font-semibold text-amber-700 hover:bg-surface"
                     >
-                      Nema slobodnih termina
-                    </button>
-
-                    <button
-                      type="button"
+                      Nema termina
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
                       onClick={() => {
                         const note = interviewNote || "Poslodavac nije prihvatio kandidata. Izaberi novi posao iz baze.";
                         setJobApplicationStatus("REJECTED");
                         setHasJob(false);
                         if (!interviewNote) setInterviewNote(note);
-                        const updated = buildUpdatedCandidate({
-                          jobApplicationStatus: "REJECTED",
-                          interviewNote: note,
-                          hasJob: false,
-                        });
-                        onSave(updated, { keepOpen: true });
-                        setAdminToast("Evidentirano: poslodavac je odbio kandidata. Izbor posla je ponovo otvoren.");
-                        setTimeout(() => setAdminToast(""), 4000);
+                        saveJob({ jobApplicationStatus: "REJECTED", interviewNote: note, hasJob: false }, "Evidentirano: poslodavac je odbio kandidata. Izbor posla je ponovo otvoren.");
                       }}
-                      className="rounded-lg border-red-200 bg-white px-3.5 py-1.5 text-xs font-semibold text-red-700 hover:bg-surface"
                     >
-                      Poslodavac odbio kandidata
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setJobApplicationStatus("ACCEPTED");
-                        setHasJob(true);
-                        const updated = buildUpdatedCandidate({
-                          jobApplicationStatus: "ACCEPTED",
-                          hasJob: true,
-                        });
-                        onSave(updated, { keepOpen: true });
-                        setAdminToast("Poslodavac je prihvatio kandidata. Job offer je potvrđen.");
-                        setTimeout(() => setAdminToast(""), 4000);
-                      }}
-                      className="rounded-lg bg-ink px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-ink"
-                    >
-                      Prihvaćen, job offer
-                    </button>
+                      Odbijen
+                    </Button>
                   </div>
-                </div>
-              </div>
+                </Section>
 
-              {/* 3. Druga rata programa (400 EUR) */}
-              <div
-                className={`rounded-xl border p-4 flex flex-wrap items-center justify-between gap-4 ${
-                  secondInstallmentPaid
-                    ? "border-line bg-white"
-                    : secondInstallmentStatus === "pending"
-                    ? "border-line bg-white"
-                    : "border-line bg-white"
-                }`}
-              >
-                <div>
-                  <div className="flex items-center gap-2">
-                    <h4 className="text-[15px] font-semibold text-ink">
-                      {isFull
-                        ? "Plaćanje u celosti"
-                        : `II rata (${secondInstallmentAmount} €)`}
-                    </h4>
-                    <span
-                      className={`rounded-full px-3 py-1 text-xs font-medium ${
-                        (isFull ? isFullPaymentPaid || secondInstallmentPaid : secondInstallmentPaid)
-                          ? "bg-surface-2 text-emerald-700"
-                          : secondInstallmentStatus === "pending"
-                          ? "bg-surface-2 text-amber-700"
-                          : "bg-surface-2 text-ink-3"
-                      }`}
-                    >
-                      {isFull
-                        ? isFullPaymentPaid
-                          ? "Plaćeno u celosti"
-                          : "Bez II rate"
-                        : secondInstallmentPaid
-                        ? "II rata plaćena"
-                        : secondInstallmentStatus === "pending"
-                        ? "Prijavljena uplata"
-                        : "Nije plaćeno"}
-                    </span>
-                  </div>
-                  <p className="text-xs text-ink-3 mt-1">
-                    {isFull
-                      ? "Program se plaća u celosti, pa II rata ne postoji."
-                      : "Plaća se kad je job offer potpisan."}
-                  </p>
-                </div>
-
-                <div className="flex items-center gap-2">
-                  {!isFull && !secondInstallmentPaid && (
-                    <button
-                      type="button"
-                      onClick={() => handleConfirmInstallmentAction(2)}
-                      className="rounded-lg bg-ink px-3 py-1.5 text-xs font-semibold text-white hover:bg-ink"
-                    >
-                      Proknjiži II ratu ({secondInstallmentAmount} €)
-                    </button>
-                  )}
-                  {!isFull && secondInstallmentPaid && (
-                    <span className="text-xs font-semibold text-emerald-700">Proknjiženo</span>
-                  )}
-                </div>
-              </div>
-            </div>
-          );
-        })()}
-
-        {/* ================================================================ */}
-        {/* TAB 4: KORAK 3 — VIZA & POLAZAK (DS-2019, DS-160, Ambasada, Let) */}
-        {/* ================================================================ */}
-        {activeTab === "step3_visa" && (
-          <div className="space-y-5">
-            {/* 1. DS-2019, Ambasada termin i III rata */}
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-              <div className="rounded-xl border border-line bg-white p-4 space-y-3">
-                <h4 className="text-[15px] font-semibold text-ink">
-                  DS-2019 i ambasada
-                </h4>
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                  <Field label="Status DS-2019">
-                    <select value={ds2019Status} onChange={(e) => setDs2019Status(e.target.value)} className={FIELD_CLS}>
-                      <option value="LOCKED">Čeka II ratu</option>
-                      <option value="IN_PROGRESS">U izradi kod sponzora</option>
-                      <option value="ISSUED">Izdat, SEVIS aktivan</option>
-                    </select>
-                  </Field>
-                  <Field label="SEVIS / DS-2019 broj">
-                    <input value={ds2019Number} onChange={(e) => setDs2019Number(e.target.value)} placeholder="npr. N0012345678" className={`${FIELD_CLS} tabular-nums`} />
-                  </Field>
-                  <Field label="Razgovor u ambasadi">
-                    <input type="datetime-local" value={embassyInterviewDate} onChange={(e) => setEmbassyInterviewDate(e.target.value)} className={FIELD_CLS} />
-                  </Field>
-                  <Field label="Priprema za ambasadu">
-                    <select value={embassyPrepStatus} onChange={(e) => setEmbassyPrepStatus(e.target.value)} className={FIELD_CLS}>
-                      <option value="NOT_SCHEDULED">Nije održana</option>
-                      <option value="SCHEDULED">Zakazana priprema</option>
-                      <option value="COMPLETED">Održana</option>
-                    </select>
-                  </Field>
-                </div>
-                <div className="pt-1">
-                  <a
-                    href="/documents/Uplatnica_viziranje.docx"
-                    download="Uplatnica_viziranje.docx"
-                    className="inline-flex items-center gap-1.5 text-xs font-semibold text-ink hover:underline"
-                  >
-                    Uplatnica za vizu (.docx)
-                  </a>
-                </div>
-              </div>
-
-              {/* III rata i Avio karta / Orijentacija */}
-              <div className="rounded-xl border border-line bg-white p-4 space-y-3">
-                <h4 className="text-[15px] font-semibold text-ink">
-                  {isFull
-                    ? "Plaćanje u celosti, let i orijentacija"
-                    : `III rata (${thirdInstallmentAmount} €), let i orijentacija`}
-                </h4>
-                <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-line bg-surface p-3">
-                  <div>
-                    <p className="text-xs font-semibold text-ink">
-                      {isFull
-                        ? "Plaćanje u celosti, bez III rate"
-                        : `III rata (${thirdInstallmentAmount} €), ${paymentMethod === "now" ? "standardno" : "PKZ"}`}
-                    </p>
-                    <p className="text-xs text-ink-3">
-                      Status: {isFull ? (isFullPaymentPaid ? "Plaćeno u celosti" : "Čeka uplatu u celosti") : thirdInstallmentPaid ? "Plaćeno" : thirdInstallmentStatus === "pending" ? "Prijavljena uplata" : "Čeka uplatu ili PKZ"}
-                    </p>
-                  </div>
-                  {!isFull && !thirdInstallmentPaid && (
-                    <button
-                      type="button"
-                      onClick={() => handleConfirmInstallmentAction(3)}
-                      className="rounded-lg bg-ink px-3 py-1.5 text-xs font-semibold text-white hover:bg-ink"
-                    >
-                      Potvrdi III ratu ({thirdInstallmentAmount} €)
-                    </button>
-                  )}
-                </div>
-
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                  <Field label="Polazak">
-                    <input type="date" value={flightDepartureDate} onChange={(e) => setFlightDepartureDate(e.target.value)} className={FIELD_CLS} />
-                  </Field>
-                  <Field label="Povratak">
-                    <input type="date" value={flightReturnDate} onChange={(e) => setFlightReturnDate(e.target.value)} className={FIELD_CLS} />
-                  </Field>
-                </div>
-
-                <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
-                  <label className="flex items-center gap-2 text-xs font-semibold text-ink cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={orientationAttended}
-                      onChange={(e) => setOrientationAttended(e.target.checked)}
-                      className="h-4 w-4 rounded"
-                    />
-                    Orijentacija održana
-                  </label>
-                  <a
-                    href="/documents/Narudzbenica-avio-karte.pdf"
-                    target="_blank"
-                    rel="noreferrer"
-                    className="text-xs font-semibold text-ink hover:underline"
-                  >
-                    Narudžbenica avio karte
-                  </a>
-                </div>
-              </div>
-            </div>
-
-            {/* 2. Pregled DS-160 upitnika */}
-            <div className="rounded-xl border border-line bg-white p-4 space-y-3">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div className="flex items-center gap-2">
-                  <h4 className="text-[15px] font-semibold text-ink">
-                    DS-160 upitnik kandidata
-                  </h4>
-                  {(() => {
-                    const st = getDs160Status(candidate.ds160);
-                    if (st.isComplete) {
-                      return (
-                        <span className="rounded-lg bg-surface-2 text-emerald-700 px-3 py-1 text-xs font-medium">
-                          Popunjen
-                        </span>
-                      );
-                    }
-                    if (st.isStarted) {
-                      return (
-                        <span className="rounded-lg bg-surface-2 text-amber-700 px-3 py-1 text-xs font-medium">
-                          Popunjeno {st.filledCount} od {st.totalCount}
-                        </span>
-                      );
-                    }
-                    return (
-                      <span className="rounded-lg bg-surface-2 text-ink-3 px-3 py-1 text-xs font-medium">
-                        Nije popunjavano
-                      </span>
-                    );
-                  })()}
-                </div>
-                <a
-                  href="/documents/UPITNIK_za_izradu_DS160_J1.docx"
-                  download="UPITNIK_za_izradu_DS160_J1.docx"
-                  className="text-xs font-semibold text-ink hover:underline"
-                >
-                  Prazan DS-160 (.docx)
-                </a>
-              </div>
-
-              {ds160Entries.length === 0 ? (
-                <p className="text-xs text-ink-3 py-3">
-                  Kandidat još nije popunio DS-160 upitnik u svom nalogu.
-                </p>
-              ) : (
-                <div className="grid max-h-64 grid-cols-1 gap-2 overflow-y-auto sm:grid-cols-2 md:grid-cols-3 pr-1">
-                  {ds160Entries.map(([k, v]) => (
-                    <div key={k} className="rounded-lg border border-line bg-surface px-3 py-2">
-                      <p className="text-xs font-semibold text-ink-3">{k}</p>
-                      <p className="text-xs font-semibold text-ink break-words mt-0.5">{String(v || "—")}</p>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            {/* Glavni status J-1 Vize */}
-            <div
-              className={`rounded-xl border p-4 flex flex-wrap items-center justify-between gap-4 ${
-                hasVisa
-                  ? "border-line bg-white"
-                  : "border-line bg-surface"
-              }`}
-            >
-              <div>
-                <div className="flex items-center gap-2">
-                  <h4 className="text-[15px] font-semibold text-ink">
-                    Odluka o vizi
-                  </h4>
-                  <span
-                    className={`rounded-full px-3 py-1 text-xs font-medium ${
-                      hasVisa ? "bg-surface-2 text-emerald-700" : "bg-surface-2 text-ink"
-                    }`}
-                  >
-                    {hasVisa ? "Viza odobrena" : "Čekanje na vizu"}
-                  </span>
-                </div>
-                <p className="text-xs text-ink-2 mt-1">
-                  Kad ambasada odobri J-1 vizu, potvrdi je ovde. Kandidat dobija status Viza odobrena.
-                </p>
-              </div>
-
-              <div className="flex items-center gap-2">
-                {!hasVisa ? (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setHasVisa(true);
-                      setStatus("ready");
-                      const updated = buildUpdatedCandidate({ hasVisa: true, status: "ready" });
-                      onSave(updated, { keepOpen: true });
-                      showToast("J-1 viza je potvrđena. Kandidat ima status Viza odobrena.");
-                    }}
-                    className="rounded-lg bg-ink px-4 py-2 text-xs font-bold text-white hover:bg-ink"
-                  >
-                    Potvrdi odobrenu vizu
-                  </button>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setHasVisa(false);
-                      setStatus("departure");
-                      const updated = buildUpdatedCandidate({ hasVisa: false, status: "departure" });
-                      onSave(updated, { keepOpen: true });
-                      showToast("Status je vraćen na Čekanje na vizu.");
-                    }}
-                    className="rounded-lg border border-line-strong bg-white px-3 py-1.5 text-xs font-semibold text-ink hover:bg-surface-2"
-                  >
-                    Vrati na čekanje vize
-                  </button>
-                )}
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* ================================================================ */}
-        {/* TAB 5: FINANSIJE, DINAMIČKE RATE & KIR FAKTURE                  */}
-        {/* ================================================================ */}
-        {activeTab === "finances" && (
-          <div className="space-y-4">
-            {/* Finansijski bilans u EUR i RSD */}
-            <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-5">
-              <div className="rounded-xl border border-line bg-white p-3">
-                <p className="text-xs font-semibold text-ink-3">Cena paketa</p>
-                <p className="text-base sm:text-lg font-bold text-ink mt-0.5">{formatEur(basePrice)}</p>
-                <p className="text-xs font-semibold text-ink-3 mt-0.5">{formatRsd(basePrice * currentNbsRate)}</p>
-              </div>
-              <div className="rounded-xl border border-line bg-white p-3">
-                <p className="text-xs font-semibold text-ink-3">Popust</p>
-                <p className="text-base sm:text-lg font-bold text-emerald-700 mt-0.5">-{formatEur(numDiscount)}</p>
-                <p className="text-xs font-semibold text-emerald-700/80 mt-0.5">-{formatRsd(numDiscount * currentNbsRate)}</p>
-              </div>
-              <div className="rounded-2xl border border-line bg-white p-5 sm:p-6">
-                <p className="text-xs font-semibold text-ink">Za uplatu</p>
-                <p className="text-base sm:text-lg font-bold text-ink mt-0.5">{formatEur(finalPrice)}</p>
-                <p className="text-xs font-semibold text-ink mt-0.5">{formatRsd(finalPrice * currentNbsRate)}</p>
-              </div>
-              <div className="rounded-xl border border-line bg-white p-3">
-                <p className="text-xs font-semibold text-ink-3">Ukupno uplaćeno</p>
-                <p className="text-base sm:text-lg font-bold text-emerald-700 mt-0.5">{formatEur(totalPaidEur)}</p>
-                <p className="text-xs font-bold text-emerald-700 mt-0.5">{formatRsd(totalPaidRsd)}</p>
-              </div>
-              <div className="rounded-xl border border-line bg-white p-3 col-span-2 sm:col-span-1">
-                <p className="text-xs font-semibold text-ink-3">Preostali dug</p>
-                <p className="text-base sm:text-lg font-bold text-amber-700 mt-0.5">{formatEur(remainingEur)}</p>
-                <p className="text-xs font-semibold text-amber-700 mt-0.5">{formatRsd(remainingRsd)}</p>
-              </div>
-            </div>
-
-            {/* Podešavanje modela plaćanja i dinamičkih iznosa rata */}
-            <div className="rounded-xl border border-line bg-white p-4 space-y-3.5">
-              <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
-                <div>
-                  <h4 className="text-[13px] font-bold text-ink-2">
-                    Plan plaćanja
-                  </h4>
-                  <p className="text-xs text-ink-3 mt-0.5">
-                    Iznosi rata mogu da se prilagode ovom kandidatu.
-                  </p>
-                </div>
-                <span className="rounded-lg bg-surface-2 px-3 py-1 text-xs font-medium text-ink-2">
-                  Srednji kurs NBS: <strong className="tabular-nums text-ink">{Number(currentNbsRate).toFixed(4)} RSD</strong>
-                </span>
-              </div>
-
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 md:grid-cols-4 items-end">
-                <Field label="Model plaćanja">
-                  <select
-                    value={paymentMethod}
-                    onChange={(e) => setPaymentMethod(e.target.value)}
-                    className={FIELD_CLS}
-                  >
-                    <option value="now">Jednokratno, u celosti</option>
-                    <option value="installments">Na rate (I, II i III)</option>
-                    <option value="later">PKZ, plaćanje kroz zaradu</option>
-                  </select>
-                </Field>
-
-                {paymentMethod !== "now" ? (
-                  <>
-                    <Field label="I rata (EUR)">
-                      <input
-                        type="number"
-                        min="0"
-                        step="10"
-                        value={firstInstallmentAmount}
-                        onChange={(e) => setFirstInstallmentAmount(Number(e.target.value) || 0)}
-                        className={FIELD_CLS}
-                      />
-                    </Field>
-                    <Field label="II rata (EUR)">
-                      <input
-                        type="number"
-                        min="0"
-                        step="10"
-                        value={secondInstallmentAmount}
-                        onChange={(e) => setSecondInstallmentAmount(Number(e.target.value) || 0)}
-                        className={FIELD_CLS}
-                      />
-                    </Field>
-                    <Field label="III rata (EUR)">
-                      <div className="flex gap-1.5">
-                        <input
-                          type="number"
-                          min="0"
-                          step="10"
-                          value={thirdInstallmentAmount}
-                          onChange={(e) => setThirdInstallmentAmount(Number(e.target.value) || 0)}
-                          className={FIELD_CLS}
-                        />
-                        <button
-                          type="button"
-                          onClick={() => {
-                            const balanced = Math.max(0, finalPrice - Number(firstInstallmentAmount || 0) - Number(secondInstallmentAmount || 0));
-                            setThirdInstallmentAmount(balanced);
-                            showToast(`III rata je podešena na ${balanced} €, da zbir odgovara ceni programa.`);
-                          }}
-                          title="Izračunaj III ratu"
-                          className="rounded-lg bg-surface-2 hover:bg-neutral-200 border border-line-strong px-2 text-xs font-semibold text-ink whitespace-nowrap"
-                        >
-                          Auto
+                <Section title="Ponude koje kandidat vidi" aside={<span className="text-[13px] text-ink-3">{offeredCount} ponuda</span>}>
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <Toggle checked={offerAllJobs} onChange={setOfferAllJobs}>
+                      Sve iz baze poslova
+                    </Toggle>
+                    {!offerAllJobs && (
+                      <div className="flex gap-4">
+                        <button type="button" onClick={() => setOfferedJobIds(allCatalogJobs.map((j) => j.id))} className={linkCls}>
+                          Označi sve
+                        </button>
+                        <button type="button" onClick={() => setOfferedJobIds([])} className={linkCls}>
+                          Poništi
                         </button>
                       </div>
-                    </Field>
-                  </>
-                ) : (
-                  <div className="sm:col-span-3 rounded-lg border border-line bg-white p-2.5 text-xs text-emerald-700">
-                    <p className="font-semibold">Jednokratna uplata</p>
-                    <p className="text-xs text-emerald-700/80 mt-0.5">
-                      Ceo iznos odjednom: {formatEur(finalPrice)}, odnosno {formatRsd(finalPrice * currentNbsRate)}. Nema II i III rate.
-                    </p>
-                  </div>
-                )}
-              </div>
-
-              {paymentMethod !== "now" && (
-                <div className="flex flex-wrap items-center justify-between gap-2 text-xs pt-1">
-                  <div className="flex items-center gap-2">
-                    <span className="font-semibold text-ink-2">Zbir rata:</span>
-                    <strong className="font-semibold text-ink">
-                      {formatEur(firstInstallmentAmount + secondInstallmentAmount + thirdInstallmentAmount)}
-                    </strong>
-                    {firstInstallmentAmount + secondInstallmentAmount + thirdInstallmentAmount === finalPrice ? (
-                      <span className="text-emerald-700 font-semibold">(Zbir u potpunosti odgovara ceni programa)</span>
-                    ) : (
-                      <span className="text-amber-700 font-semibold">
-                        (Razlika u odnosu na cenu paketa: {formatEur(finalPrice - (firstInstallmentAmount + secondInstallmentAmount + thirdInstallmentAmount))})
-                      </span>
                     )}
                   </div>
-                </div>
-              )}
-            </div>
-
-            {/* Prikaz kartica: Jednokratno ili 3 rate */}
-            {paymentMethod === "now" ? (
-              <div className={`rounded-xl border p-4 ${isFullPaymentPaid || firstInstallmentApproved ? "border-line bg-white" : "border-line bg-white"}`}>
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div>
-                    <span className="text-xs font-medium text-ink-3">
-                      Jednokratno plaćanje
-                    </span>
-                    <h4 className="mt-0.5 text-[15px] font-semibold text-ink">
-                      Uplata programa u celosti
-                    </h4>
-                  </div>
-                  <span
-                    className={`rounded-full px-3 py-1 text-xs font-medium ${
-                      isFullPaymentPaid || firstInstallmentApproved
-                        ? "bg-surface-2 text-emerald-700"
-                        : firstInstallmentStatus === "pending"
-                        ? "bg-surface-2 text-amber-700"
-                        : "bg-surface-2 text-ink-3"
-                    }`}
-                  >
-                    {isFullPaymentPaid || firstInstallmentApproved
-                      ? "Plaćeno u celosti"
-                      : firstInstallmentStatus === "pending"
-                      ? "Prijavljena uplata"
-                      : "Čeka uplatu"}
-                  </span>
-                </div>
-
-                <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
-                  <div className="rounded-lg border border-line bg-surface p-3">
-                    <span className="text-xs font-semibold text-ink-3">Iznos u devizama</span>
-                    <p className="text-lg font-bold text-ink mt-0.5">{formatEur(finalPrice)}</p>
-                  </div>
-                  <div className="rounded-lg border border-line bg-surface p-3">
-                    <span className="text-xs font-semibold text-ink-3">
-                      {candidate.fullPaymentPaidRsd ? "Zaključan iznos (RSD)" : "Iznos u dinarima"}
-                    </span>
-                    <p className="text-lg font-bold text-ink mt-0.5">
-                      {formatRsd(
-                        candidate.fullPaymentPaidRsd ||
-                          Math.round(finalPrice * (candidate.fullPaymentExchangeRate || currentNbsRate) * 100) / 100
-                      )}
-                    </p>
-                  </div>
-                </div>
-
-                {candidate.fullPaymentPaidRsd ? (
-                  <div className="mt-3 rounded-lg border border-line bg-white p-2.5 text-xs text-emerald-700 flex flex-wrap items-center justify-between gap-2">
-                    <div>
-                      <p className="font-semibold">
-                        Plaćeno {candidate.fullPaymentPaidDate || "—"}, kurs NBS {Number(candidate.fullPaymentExchangeRate || currentNbsRate).toFixed(4)} RSD
-                      </p>
-                      <p className="text-xs text-emerald-700/80 mt-0.5">
-                        Dinarski iznos je zaključan na dan knjiženja.
-                      </p>
-                    </div>
-                    <span className="rounded-md bg-surface-2 text-emerald-700 px-2 py-0.5 text-2xs font-semibold">
-                      Evidentirano u KIR
-                    </span>
-                  </div>
-                ) : (
-                  <div className="mt-3 flex items-center justify-between gap-2 pt-2 border-t border-line">
-                    <p className="text-xs text-ink-2">
-                      Današnji srednji kurs NBS: <strong>{Number(currentNbsRate).toFixed(4)} RSD</strong>
-                    </p>
-                    <button
-                      type="button"
-                      onClick={() => handleConfirmInstallmentAction("full")}
-                      className="rounded-lg bg-ink px-4 py-2 text-xs font-semibold text-white hover:bg-ink"
-                    >
-                      Proknjiži uplatu ({formatEur(finalPrice)})
-                    </button>
-                  </div>
-                )}
+                  {!offerAllJobs && (
+                    <ul className="mt-4 grid max-h-72 gap-2 overflow-y-auto sm:grid-cols-2">
+                      {allCatalogJobs.map((job) => {
+                        const isOffered = offeredJobIds.includes(job.id);
+                        return (
+                          <li key={job.id}>
+                            <label
+                              className={`flex cursor-pointer items-start gap-3 rounded-xl border px-3.5 py-3 text-sm transition-colors ${
+                                isOffered ? "border-ink bg-white" : "border-line bg-white hover:border-line-strong"
+                              }`}
+                            >
+                              <input type="checkbox" checked={isOffered} onChange={() => toggleJobOffer(job.id)} className="mt-0.5 h-4 w-4 accent-neutral-900" />
+                              <span className="min-w-0">
+                                <span className="block truncate font-medium text-ink">{job.title}</span>
+                                <span className="block truncate text-[13px] text-ink-3">
+                                  {job.employer}, {job.city} · {job.wage}
+                                </span>
+                              </span>
+                            </label>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  )}
+                </Section>
               </div>
-            ) : (
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-                {[
-                  {
-                    num: 1,
-                    title: "I rata, uz ugovor",
-                    eur: r1Amount,
-                    paid: firstInstallmentApproved,
-                    status: firstInstallmentStatus,
-                    paidRsd: candidate.firstInstallmentPaidRsd,
-                    rate: candidate.firstInstallmentExchangeRate,
-                    paidDate: candidate.firstInstallmentPaidDate,
-                  },
-                  {
-                    num: 2,
-                    title: "II rata, uz job offer",
-                    eur: r2Amount,
-                    paid: secondInstallmentPaid,
-                    status: secondInstallmentStatus,
-                    paidRsd: candidate.secondInstallmentPaidRsd,
-                    rate: candidate.secondInstallmentExchangeRate,
-                    paidDate: candidate.secondInstallmentPaidDate,
-                  },
-                  {
-                    num: 3,
-                    title: "III rata, pred vizu ili PKZ",
-                    eur: r3Amount,
-                    paid: thirdInstallmentPaid,
-                    status: thirdInstallmentStatus,
-                    paidRsd: candidate.thirdInstallmentPaidRsd,
-                    rate: candidate.thirdInstallmentExchangeRate,
-                    paidDate: candidate.thirdInstallmentPaidDate,
-                  },
-                ].map((r) => {
-                  const calculatedRsd = Math.round(r.eur * currentNbsRate * 100) / 100;
-                  const displayRsd = r.paid && r.paidRsd ? r.paidRsd : calculatedRsd;
-                  const displayRate = r.paid && r.rate ? r.rate : currentNbsRate;
+            );
+          })()}
 
-                  return (
-                    <div
-                      key={r.num}
-                      className={`rounded-xl border p-3.5 flex flex-col justify-between ${
-                        r.paid ? "border-line bg-white" : "border-line bg-white"
-                      }`}
-                    >
-                      <div className="space-y-2">
-                        <div className="flex items-center justify-between">
-                          <span className="text-xs font-semibold text-ink">{r.title}</span>
-                          <span
-                            className={`rounded-full px-3 py-1 text-xs font-medium ${
-                              r.paid
-                                ? "bg-surface-2 text-emerald-700"
-                                : r.status === "pending"
-                                ? "bg-surface-2 text-amber-700"
-                                : "bg-surface-2 text-ink-3"
-                            }`}
-                          >
-                            {r.paid ? "Plaćeno" : r.status === "pending" ? "Prijavljeno" : "Nije plaćeno"}
-                          </span>
-                        </div>
-
-                        <div>
-                          <p className="text-lg font-bold text-ink">{formatEur(r.eur)}</p>
-                          <p className="text-xs font-semibold text-ink-2 mt-0.5">
-                            = {formatRsd(displayRsd)}
-                          </p>
-                        </div>
-
-                        {r.paid && (
-                          <div className="rounded-lg border border-line bg-white p-2 text-2xs text-emerald-700 space-y-0.5">
-                            <p className="font-semibold">
-                              Proknjiženo: {r.paidDate || "—"}
-                            </p>
-                            <p className="text-ink-2">
-                              Kurs NBS: {Number(displayRate).toFixed(4)} RSD
-                            </p>
-                            <p className="text-2xs font-semibold text-emerald-700">
-                              Zaključan dinarski iznos
-                            </p>
-                          </div>
-                        )}
-
-                        {!r.paid && (
-                          <p className="text-2xs text-ink-3">
-                            Obračun po kursu: {Number(currentNbsRate).toFixed(4)} RSD
-                          </p>
-                        )}
-                      </div>
-
-                      {!r.paid && (
-                        <button
-                          type="button"
-                          onClick={() => handleConfirmInstallmentAction(r.num)}
-                          className="mt-3 w-full rounded-lg bg-ink py-1.5 text-xs font-semibold text-white hover:bg-ink"
-                        >
-                          Proknjiži {r.num}. ratu ({formatEur(r.eur)})
-                        </button>
-                      )}
-                    </div>
-                  );
-                })}
+        {/* =================== VIZA I LET =================== */}
+        {activeTab === "visa" && (
+          <div className="space-y-4">
+            <Section title="DS-2019 i ambasada">
+              <div className="grid gap-3.5 sm:grid-cols-2">
+                <Field label="DS-2019">
+                  <select value={ds2019Status} onChange={(e) => setDs2019Status(e.target.value)} className={FIELD_CLS}>
+                    <option value="LOCKED">Čeka II ratu</option>
+                    <option value="IN_PROGRESS">U izradi kod sponzora</option>
+                    <option value="ISSUED">Izdat, SEVIS aktivan</option>
+                  </select>
+                </Field>
+                <Field label="SEVIS / DS-2019 broj">
+                  <input value={ds2019Number} onChange={(e) => setDs2019Number(e.target.value)} placeholder="N0012345678" className={`${FIELD_CLS} tabular-nums`} />
+                </Field>
+                <Field label="Razgovor u ambasadi">
+                  <input type="datetime-local" value={embassyInterviewDate} onChange={(e) => setEmbassyInterviewDate(e.target.value)} className={FIELD_CLS} />
+                </Field>
+                <Field label="Probni razgovor">
+                  <select value={embassyPrepStatus} onChange={(e) => setEmbassyPrepStatus(e.target.value)} className={FIELD_CLS}>
+                    <option value="NOT_SCHEDULED">Nije održan</option>
+                    <option value="SCHEDULED">Zakazan</option>
+                    <option value="COMPLETED">Održan</option>
+                  </select>
+                </Field>
               </div>
-            )}
-
-            {/* Garancija kursa obaveštenje */}
-            <div className="rounded-xl border border-line bg-neutral-50/70 p-3 text-xs text-ink-2">
-              <p className="font-semibold text-ink">
-                Kurs NBS:
+              <p className="mt-4 text-[13px] text-ink-3">
+                DS-160: {ds160St.isComplete ? "popunjen" : ds160St.isStarted ? `${ds160St.filledCount} od ${ds160St.totalCount} polja` : "nije počet"} ·{" "}
+                <button type="button" onClick={() => go("docs")} className={linkCls}>
+                  odgovori u Dokumentima
+                </button>
               </p>
-              <p className="text-xs text-ink-2 mt-0.5">
-                Pri knjiženju se čuvaju datum, srednji kurs NBS tog dana i uplaćen iznos u dinarima. Kasnija promena kursa ne menja proknjižene iznose.
-</p>
-            </div>
+            </Section>
 
-            {/* KIR Fakture */}
-            <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-line bg-surface p-3.5">
-              <div>
-                <p className="text-xs font-semibold text-ink">Računi (KIR)</p>
-                <p className="text-xs text-ink-3">
-                  Svaka proknjižena rata automatski dobija račun. Dodatni račun se izdaje ručno.
-                </p>
-              </div>
-              <PrimaryButton onClick={() => setShowCreateInvoiceModal(true)}>
-                <PlusIcon className="h-4 w-4" /> Izdaj račun
-              </PrimaryButton>
-            </div>
+            <Section
+              title="Odluka o vizi"
+              aside={<StatusText state={hasVisa ? "done" : "wait"}>{hasVisa ? "Odobrena" : "Čeka razgovor"}</StatusText>}
+              hint="Kad ambasada odobri J-1 vizu, potvrdi je ovde — kandidat dobija status Viza odobrena."
+            >
+              {!hasVisa ? (
+                <Button
+                  variant="dark"
+                  onClick={() => {
+                    setHasVisa(true);
+                    setStatus("ready");
+                    onSave(buildUpdatedCandidate({ hasVisa: true, status: "ready" }), { keepOpen: true });
+                    showToast("J-1 viza je potvrđena. Kandidat ima status Viza odobrena.");
+                  }}
+                >
+                  Potvrdi odobrenu vizu
+                </Button>
+              ) : (
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setHasVisa(false);
+                    setStatus("departure");
+                    onSave(buildUpdatedCandidate({ hasVisa: false, status: "departure" }), { keepOpen: true });
+                    showToast("Status je vraćen na Čekanje na vizu.");
+                  }}
+                >
+                  Vrati na čekanje vize
+                </Button>
+              )}
+            </Section>
 
-            {candidateInvoices.length === 0 ? (
-              <div className="rounded-xl border border-dashed border-line-strong py-8 text-center text-xs text-ink-3">
-                Još nema računa.
+            <Section title="Let i orijentacija">
+              <div className="grid gap-3.5 sm:grid-cols-2">
+                <Field label="Polazak">
+                  <input type="date" value={flightDepartureDate} onChange={(e) => setFlightDepartureDate(e.target.value)} className={FIELD_CLS} />
+                </Field>
+                <Field label="Povratak">
+                  <input type="date" value={flightReturnDate} onChange={(e) => setFlightReturnDate(e.target.value)} className={FIELD_CLS} />
+                </Field>
+                <Field label="Avio karta">
+                  <select value={flightTicketStatus} onChange={(e) => setFlightTicketStatus(e.target.value)} className={FIELD_CLS}>
+                    <option value="PENDING">Nije kupljena</option>
+                    <option value="BOOKED">Rezervisana</option>
+                    <option value="ISSUED">Izdata</option>
+                  </select>
+                </Field>
+                <div className="flex items-end pb-2.5">
+                  <Toggle checked={orientationAttended} onChange={setOrientationAttended}>
+                    Orijentacija održana
+                  </Toggle>
+                </div>
               </div>
-            ) : (
-              <div className="overflow-hidden rounded-xl border border-line">
-                <table className="w-full text-left border-collapse">
-                  <thead>
-                    <tr className="border-b border-line bg-surface text-xs font-semibold text-ink-3">
-                      <th className="px-3.5 py-2.5">Broj fakture</th>
-                      <th className="px-3.5 py-2.5">Svrha</th>
-                      <th className="px-3.5 py-2.5 text-right">EUR</th>
-                      <th className="px-3.5 py-2.5 text-right">RSD</th>
-                      <th className="px-3.5 py-2.5">Status</th>
-                      <th className="px-3.5 py-2.5 text-right">Akcije</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-line text-xs">
-                    {candidateInvoices.map((inv) => {
-                      const st = PAYMENT_STATUSES[inv.status] || PAYMENT_STATUSES.PENDING;
-                      return (
-                        <tr key={inv.id}>
-                          <td className="px-3.5 py-2.5 tabular-nums font-semibold">{inv.invoiceNumber}</td>
-                          <td className="px-3.5 py-2.5">{inv.purpose}</td>
-                          <td className="px-3.5 py-2.5 text-right font-semibold">{inv.originalAmount.toFixed(2)} {inv.currency}</td>
-                          <td className="px-3.5 py-2.5 text-right font-bold">{formatRsd(inv.totalRsd)}</td>
-                          <td className="px-3.5 py-2.5">
-                            <span className={`inline-flex rounded-lg border px-3 py-1 text-xs font-medium ${st.badgeCls}`}>
-                              {st.label}
-                            </span>
-                          </td>
-                          <td className="px-3.5 py-2.5 text-right">
-                            {inv.status !== "PAID" && inv.status !== "CANCELLED" && (
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  updateInvoiceStatus(inv.id, "PAID");
-                                  refreshCandidateInvoices();
-                                }}
-                                className="rounded-lg bg-ink px-2.5 py-1 text-xs font-semibold text-white hover:bg-ink"
-                              >
-                                Proknjiži
-                              </button>
-                            )}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            )}
+            </Section>
           </div>
         )}
 
-        {/* ================================================================ */}
-        {/* TAB 6: SELEKCIJA (FAZA 0) & INTERNE BELEŠKE                      */}
-        {/* ================================================================ */}
-        {activeTab === "history" && (
+        {/* =================== PODACI =================== */}
+        {activeTab === "data" && (
           <div className="space-y-4">
-            <div className="rounded-xl border border-line bg-white p-4 space-y-3.5">
-              <h4 className="text-[15px] font-semibold text-ink">
-                Selekcija (Faza 0)
-              </h4>
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-                <Field label="Status prvog kontakta">
+            <Section title="Lični podaci" hint="Isti podaci idu u ugovor i DS-160.">
+              <div className="grid gap-3.5 sm:grid-cols-3">
+                <Field label="Ime">
+                  <input value={firstName} onChange={(e) => setFirstName(e.target.value)} className={FIELD_CLS} required />
+                </Field>
+                <Field label="Prezime">
+                  <input value={lastName} onChange={(e) => setLastName(e.target.value)} className={FIELD_CLS} required />
+                </Field>
+                <Field label="E-mail">
+                  <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} className={FIELD_CLS} required />
+                </Field>
+                <Field label="Telefon">
+                  <input value={phone} onChange={(e) => setPhone(e.target.value)} className={FIELD_CLS} />
+                </Field>
+                <Field label="JMBG">
+                  <input value={jmbg} onChange={(e) => setJmbg(e.target.value)} maxLength={13} className={`${FIELD_CLS} tabular-nums`} />
+                </Field>
+                <Field label="Broj pasoša / lične karte">
+                  <input
+                    value={passportNumber}
+                    onChange={(e) => {
+                      setPassportNumber(e.target.value);
+                      setIdCardNumber(e.target.value);
+                    }}
+                    className={`${FIELD_CLS} tabular-nums`}
+                  />
+                </Field>
+                <Field label="Datum rođenja">
+                  <input value={birthDate} onChange={(e) => setBirthDate(e.target.value)} placeholder="DD/MM/GGGG" className={FIELD_CLS} />
+                </Field>
+                <Field label="Pasoš važi do">
+                  <input value={passportExpiryDate} onChange={(e) => setPassportExpiryDate(e.target.value)} placeholder="DD/MM/GGGG" className={FIELD_CLS} />
+                </Field>
+                <Field label="Pol">
+                  <select value={gender} onChange={(e) => setGender(e.target.value)} className={FIELD_CLS}>
+                    <option value="Muški">Muški</option>
+                    <option value="Ženski">Ženski</option>
+                  </select>
+                </Field>
+                <Field label="Mesto rođenja">
+                  <input value={birthPlace} onChange={(e) => setBirthPlace(e.target.value)} className={FIELD_CLS} />
+                </Field>
+                <Field label="Državljanstvo">
+                  <input value={citizenship} onChange={(e) => setCitizenship(e.target.value)} className={FIELD_CLS} />
+                </Field>
+                <Field label="Adresa">
+                  <input value={address} onChange={(e) => setAddress(e.target.value)} className={FIELD_CLS} />
+                </Field>
+              </div>
+            </Section>
+
+            <Section title="Studije">
+              <div className="grid gap-3.5 sm:grid-cols-3">
+                <Field label="Fakultet">
+                  <input value={faculty} onChange={(e) => setFaculty(e.target.value)} className={FIELD_CLS} />
+                </Field>
+                <Field label="Godina">
+                  <select value={studyYear} onChange={(e) => setStudyYear(e.target.value)} className={FIELD_CLS}>
+                    <option value="YEAR_1">I godina</option>
+                    <option value="YEAR_2">II godina</option>
+                    <option value="YEAR_3">III godina</option>
+                    <option value="YEAR_4">IV godina</option>
+                    <option value="MASTER">Master</option>
+                  </select>
+                </Field>
+                <Field label="ESPB">
+                  <input type="number" min="0" max="300" value={ectsPoints} onChange={(e) => setEctsPoints(e.target.value)} className={FIELD_CLS} />
+                </Field>
+              </div>
+            </Section>
+
+            <Section
+              title="Profil za poslodavce"
+              hint="Ono što je kandidat uneo u portalu, korak po korak."
+              aside={
+                <button type="button" onClick={() => setShowProfileBuilder(true)} className={linkCls}>
+                  Izmeni
+                </button>
+              }
+            >
+              <DataList
+                items={[
+                  ["Status", prof.profileCompleted ? `Popunjen (${prof.profileCompletionScore || 100}%)` : "Nije popunjen"],
+                  ["Engleski", prof.englishLevel || pref.englishLevel || "—"],
+                  ["Smer", prof.studyMajor || "—"],
+                  ["Dostupnost", av.startDate ? `${av.startDate} – ${av.endDate || "?"}` : "—"],
+                  ["Povratak do", av.travelUntil || "—"],
+                  ["Vrsta posla", pref.jobType || pref.position || "—"],
+                  ["Vrsta mesta", pref.locationType || pref.location || "—"],
+                  ["Države", pref.preferredStates?.length ? pref.preferredStates.join(", ") : "—"],
+                  ["Smeštaj", pref.housingPreference || "—"],
+                  ["Putuje sa", pref.travelingWith || "—"],
+                  ...(pref.testLink ? [["Test engleskog", <a href={pref.testLink} target="_blank" rel="noreferrer" className="underline">Rezultat</a>]] : []),
+                ]}
+              />
+              {av.notes && <p className="mt-4 text-[13px] text-ink-2">Napomena o datumima: {av.notes}</p>}
+              {prof.skills?.length > 0 && (
+                <div className="mt-5">
+                  <p className="text-[13px] text-ink-3">Veštine</p>
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    {prof.skills.map((s) => (
+                      <span key={s} className="rounded-full border border-line px-3 py-1 text-[13px] text-ink-2">
+                        {s}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+              <div className="mt-5">
+                <p className="text-[13px] text-ink-3">Radno iskustvo</p>
+                {prof.workExperience?.length ? (
+                  <ul className="mt-2 divide-y divide-line rounded-xl border border-line">
+                    {prof.workExperience.map((exp) => (
+                      <li key={exp.id || exp.position} className="px-4 py-3">
+                        <p className="text-sm font-medium text-ink">{exp.position}</p>
+                        <p className="text-[13px] text-ink-3">{[exp.employer, exp.city, exp.period].filter(Boolean).join(" · ")}</p>
+                        {exp.duties && <p className="mt-1 text-[13px] text-ink-2">{exp.duties}</p>}
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="mt-1 text-sm text-ink-2">Nije uneto.</p>
+                )}
+              </div>
+            </Section>
+          </div>
+        )}
+
+        {/* =================== BELEŠKE =================== */}
+        {activeTab === "notes" && (
+          <div className="space-y-4">
+            <Section title="Selekcija">
+              <div className="grid gap-3.5 sm:grid-cols-3">
+                <Field label="Prvi kontakt">
                   <select value={contactStatus} onChange={(e) => setContactStatus(e.target.value)} className={FIELD_CLS}>
                     <option value="NOT_ATTEMPTED">Nije pozvan</option>
                     <option value="REACHED">Razgovor obavljen</option>
                     <option value="NO_ANSWER">Nije se javio</option>
                   </select>
                 </Field>
-                <Field label="Status konsultacija">
+                <Field label="Konsultacije">
                   <select value={consultationStatus} onChange={(e) => setConsultationStatus(e.target.value)} className={FIELD_CLS}>
                     <option value="NOT_SCHEDULED">Nisu zakazane</option>
                     <option value="SCHEDULED">Zakazane</option>
                     <option value="ATTENDED">Održane</option>
                   </select>
                 </Field>
-                <Field label="Odluka selekcije">
+                <Field label="Odluka">
                   <select value={selectionDecision} onChange={(e) => setSelectionDecision(e.target.value)} className={FIELD_CLS}>
                     <option value="PENDING">Na čekanju</option>
                     <option value="QUALIFIED">Kvalifikovan</option>
@@ -2643,28 +2078,21 @@ export default function CandidateApplicationModal({ candidate, onSave, onClose }
                   </select>
                 </Field>
               </div>
-              <Field label="Beleške sa konsultacija">
-                <textarea rows={2} value={consultationNotes} onChange={(e) => setConsultationNotes(e.target.value)} className={FIELD_CLS} />
-              </Field>
-            </div>
+              <div className="mt-3.5">
+                <Field label="Beleške sa konsultacija">
+                  <textarea rows={2} value={consultationNotes} onChange={(e) => setConsultationNotes(e.target.value)} className={FIELD_CLS} />
+                </Field>
+              </div>
+            </Section>
 
-            <div className="rounded-xl border border-line bg-white p-4 space-y-3">
-              <h4 className="text-[15px] font-semibold text-ink">
-                Interne beleške
-              </h4>
-              <textarea
-                rows={5}
-                value={notes}
-                onChange={(e) => setNotes(e.target.value)}
-                placeholder="Vidljivo samo timu agencije"
-                className={FIELD_CLS}
-              />
-            </div>
+            <Section title="Interne beleške" hint="Vidi ih samo tim agencije. Ovde se automatski upisuju i važni događaji iz portala.">
+              <textarea rows={8} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Beleška…" className={FIELD_CLS} />
+            </Section>
           </div>
         )}
       </form>
 
-      {/* MODAL ZA KREIRANJE NOVE FAKTURE */}
+      {/* NOVI RAČUN */}
       {showCreateInvoiceModal && (
         <NewInvoiceModal
           isOpen={showCreateInvoiceModal}
@@ -2678,116 +2106,86 @@ export default function CandidateApplicationModal({ candidate, onSave, onClose }
         />
       )}
 
-      {/* MODAL ZA PREGLED DOKUMENTA */}
+      {/* PREGLED DOKUMENTA */}
       {previewDoc && (
-        <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/75 p-3 sm:p-6 backdrop-blur-xs">
-          <div className="flex max-h-[94vh] w-full max-w-5xl xl:max-w-6xl 2xl:max-w-[1360px] flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
-            <div className="flex items-center justify-between border-b border-line bg-ink px-6 py-4 text-white">
-              <div>
-                <p className="text-xs font-semibold text-brand">
-                  Pregled otpremljenog dokumenta
-                </p>
-                <h3 className="text-base font-semibold">{previewDoc.title} — {previewDoc.fileName}</h3>
+        <div className="fixed inset-0 z-[130] flex items-stretch justify-center sm:items-center sm:p-6">
+          <button type="button" aria-label="Zatvori" onClick={() => setPreviewDoc(null)} className="absolute inset-0 hidden bg-ink/60 sm:block" />
+          <div className="relative flex h-full w-full max-w-5xl flex-col bg-white sm:h-auto sm:max-h-[92vh] sm:rounded-2xl sm:shadow-2xl">
+            <div className="flex items-start gap-3 border-b border-line px-4 py-3.5 sm:px-6 sm:py-4">
+              <div className="min-w-0 flex-1">
+                <h3 className="text-[17px] font-semibold text-ink">{previewDoc.title}</h3>
+                <p className="truncate text-[13px] text-ink-3">{previewDoc.fileName}</p>
               </div>
-              <button
-                type="button"
-                onClick={() => setPreviewDoc(null)}
-                className="rounded-lg bg-white/10 px-3 py-1.5 text-xs font-semibold text-white hover:bg-white/20"
-              >
-                Zatvori
+              <button type="button" onClick={() => setPreviewDoc(null)} aria-label="Zatvori" className="-mr-1.5 flex h-10 w-10 items-center justify-center rounded-full text-ink-3 hover:bg-surface hover:text-ink">
+                <XIcon />
               </button>
             </div>
-
-            <div className="flex-1 overflow-y-auto bg-surface-2 p-4 sm:p-6">
+            <div className="min-h-0 flex-1 overflow-y-auto bg-surface p-3 sm:p-5">
               {previewDoc.url ? (
                 previewDoc.url.startsWith("data:image/") || /\.(jpg|jpeg|png|webp)$/i.test(previewDoc.fileName) ? (
-                  <div className="flex justify-center bg-white p-4 rounded-xl">
-                    <img src={previewDoc.url} alt={previewDoc.fileName} className="max-h-[74vh] object-contain rounded-lg" />
-                  </div>
+                  <img src={previewDoc.url} alt={previewDoc.fileName} className="mx-auto max-h-[72vh] rounded-lg object-contain" />
                 ) : (
-                  <iframe
-                    src={previewDoc.url}
-                    title={previewDoc.fileName}
-                    className="h-[74vh] w-full rounded-xl border border-line bg-white"
-                  />
+                  <iframe src={previewDoc.url} title={previewDoc.fileName} className="h-[72vh] w-full rounded-xl border border-line bg-white" />
                 )
               ) : (
-                <div className="rounded-xl border border-line bg-white p-8 text-center text-xs font-semibold text-amber-700">
-                  Sadržaj fajla nije dostupan za direktan prikaz. Kandidat može ponovo otpremiti fajl.
-                </div>
+                <p className="rounded-xl border border-line bg-white px-6 py-12 text-center text-sm text-ink-3">
+                  Fajl ne može da se prikaže ovde. Kandidat može ponovo da ga okači.
+                </p>
               )}
             </div>
-
-            <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line bg-white px-6 py-4">
-              {previewDoc.url ? (
-                <a
-                  href={previewDoc.url}
-                  download={previewDoc.fileName}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="rounded-lg border border-line-strong px-3.5 py-2 text-xs font-semibold text-ink hover:bg-surface-2"
-                >
-                  Preuzmi fajl ({previewDoc.fileName})
+            <div className="flex flex-wrap items-center gap-2 border-t border-line px-4 py-3.5 sm:px-6">
+              {previewDoc.url && (
+                <a href={previewDoc.url} download={previewDoc.fileName} target="_blank" rel="noreferrer" className={linkCls}>
+                  Preuzmi
                 </a>
-              ) : <span />}
-
-              <div className="flex items-center gap-2">
+              )}
+              <div className="ml-auto flex items-center gap-2">
                 {previewDoc.docCategory === "contract" && (
                   <>
-                    <button
-                      type="button"
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => {
+                        setPreviewDoc(null);
+                        rejectContract();
+                      }}
+                    >
+                      Vrati
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="dark"
                       onClick={() => {
                         handleVerifyContractAction(true);
                         setPreviewDoc(null);
                       }}
-                      className="rounded-lg bg-ink px-4 py-2 text-xs font-semibold text-white hover:bg-ink"
                     >
                       Odobri ugovor
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const doc = previewDoc;
-                        setPreviewDoc(null);
-                        setRejectionModal({
-                          type: "contract",
-                          title: `Odbijanje ugovora (${doc.fileName})`,
-                          reason: contractRejectionReason || "",
-                        });
-                      }}
-                      className="rounded-lg border-red-200 bg-white px-4 py-2 text-xs font-semibold text-red-700 hover:bg-surface"
-                    >
-                      Odbij uz obrazloženje
-                    </button>
+                    </Button>
                   </>
                 )}
                 {previewDoc.docCategory === "documents" && (
                   <>
-                    <button
-                      type="button"
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => {
+                        setPreviewDoc(null);
+                        rejectDocs();
+                      }}
+                    >
+                      Vrati
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="dark"
                       onClick={() => {
                         handleVerifyDocumentsAction(true);
                         setPreviewDoc(null);
                       }}
-                      className="rounded-lg bg-ink px-4 py-2 text-xs font-semibold text-white hover:bg-ink"
                     >
-                      Odobri dokumentaciju
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const doc = previewDoc;
-                        setPreviewDoc(null);
-                        setRejectionModal({
-                          type: "documents",
-                          title: `Vraćanje dokumenta na dopunu (${doc.fileName})`,
-                          reason: documentsRejectionReason || "",
-                        });
-                      }}
-                      className="rounded-lg border-red-200 bg-white px-4 py-2 text-xs font-semibold text-red-700 hover:bg-surface"
-                    >
-                      Vrati uz obrazloženje
-                    </button>
+                      Odobri dosije
+                    </Button>
                   </>
                 )}
               </div>
@@ -2796,44 +2194,44 @@ export default function CandidateApplicationModal({ candidate, onSave, onClose }
         </div>
       )}
 
-      {/* MODAL ZA ODBIJANJE UZ OBRAZLOŽENJE */}
+      {/* VRAĆANJE UZ OBRAZLOŽENJE */}
       {rejectionModal && (
-        <div className="fixed inset-0 z-[130] flex items-center justify-center bg-black/60 p-4 backdrop-blur-xs">
-          <div className="w-full max-w-xl lg:max-w-2xl rounded-2xl bg-white p-6 sm:p-8 shadow-2xl space-y-4">
-            <h3 className="text-base font-bold text-red-700">{rejectionModal.title}</h3>
-            <p className="text-xs text-ink-2">
-              Razlog koji kandidat vidi u svom nalogu:
-            </p>
+        <div className="fixed inset-0 z-[140] flex items-end justify-center sm:items-center sm:p-6">
+          <button type="button" aria-label="Zatvori" onClick={() => setRejectionModal(null)} className="absolute inset-0 bg-ink/50" />
+          <div className="relative w-full max-w-lg space-y-4 rounded-t-2xl bg-white p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] shadow-2xl sm:rounded-2xl sm:p-6">
+            <div>
+              <h3 className="text-[17px] font-semibold text-ink">{rejectionModal.title}</h3>
+              <p className="mt-0.5 text-[13px] text-ink-3">Kandidat vidi ovaj razlog u svom nalogu.</p>
+            </div>
             <textarea
               rows={4}
+              autoFocus
               value={rejectionModal.reason}
               onChange={(e) => setRejectionModal({ ...rejectionModal, reason: e.target.value })}
-              placeholder="Npr. Sken nije čitljiv, nedostaje potpis na poslednjoj strani..."
+              placeholder="npr. Sken nije čitljiv, fali potpis na poslednjoj strani."
               className={FIELD_CLS}
             />
             <div className="flex justify-end gap-2">
-              <SecondaryButton onClick={() => setRejectionModal(null)}>Odustani</SecondaryButton>
-              <button
-                type="button"
+              <Button variant="ghost" onClick={() => setRejectionModal(null)}>
+                Otkaži
+              </Button>
+              <Button
+                variant="danger"
                 onClick={() => {
                   const reasonText = rejectionModal.reason.trim() || "Dokument nije ispravan. Pošalji ga ponovo.";
-                  if (rejectionModal.type === "contract") {
-                    handleVerifyContractAction(false, reasonText);
-                  } else {
-                    handleVerifyDocumentsAction(false, reasonText);
-                  }
+                  if (rejectionModal.type === "contract") handleVerifyContractAction(false, reasonText);
+                  else handleVerifyDocumentsAction(false, reasonText);
                   setRejectionModal(null);
                 }}
-                className="rounded-lg bg-red-600 px-4 py-2 text-xs font-semibold text-white hover:bg-red-700"
               >
-                Potvrdi i obavesti kandidata
-              </button>
+                Vrati i obavesti
+              </Button>
             </div>
           </div>
         </div>
       )}
 
-      {/* CV BUILDER MODAL */}
+      {/* PROFIL / CV BUILDER */}
       {showProfileBuilder && (
         <ProfileBuilderModal
           candidate={liveCandidateSnapshot}
@@ -2844,10 +2242,76 @@ export default function CandidateApplicationModal({ candidate, onSave, onClose }
             const merged = buildUpdatedCandidate(updatedFields);
             onSave(merged, { keepOpen: true });
             setShowProfileBuilder(false);
-            showToast("CV i profil kandidata su ažurirani.");
+            showToast("Profil kandidata je ažuriran.");
           }}
         />
       )}
     </Modal>
+  );
+}
+
+/* ---------- Delovi dosijea (van komponente, da polja ne gube fokus) ---------- */
+const linkCls = "text-[13px] font-medium text-ink underline decoration-line-strong underline-offset-4 hover:decoration-ink";
+
+function Section({ title, hint, aside, children, className = "" }) {
+  return (
+    <section className={`${cardCls} p-5 sm:p-6 ${className}`}>
+      {(title || aside) && (
+        <div className="mb-4">
+          <div className="flex items-center justify-between gap-4">
+            {title && <h4 className="text-base font-semibold text-ink">{title}</h4>}
+            {aside}
+          </div>
+          {hint && <p className="mt-1 text-[13px] leading-relaxed text-ink-3">{hint}</p>}
+        </div>
+      )}
+      {children}
+    </section>
+  );
+}
+
+function StatusText({ state, children }) {
+  return (
+    <span
+      className={`shrink-0 text-[13px] ${
+        state === "done" ? "text-emerald-700" : state === "wait" ? "text-amber-700" : state === "danger" ? "text-red-700" : "text-ink-3"
+      }`}
+    >
+      {children}
+    </span>
+  );
+}
+
+function DocRow({ name, sub, state = "current", status, children }) {
+  return (
+    <li className="flex gap-3.5 py-3.5 first:pt-0 last:pb-0">
+      <TaskIcon state={state} className="mt-0.5" />
+      <div className="min-w-0 flex-1">
+        <div className="flex items-baseline justify-between gap-3">
+          <p className={`text-[15px] font-medium ${state === "locked" ? "text-ink-3" : "text-ink"}`}>{name}</p>
+          {status && <StatusText state={state}>{status}</StatusText>}
+        </div>
+        {sub && <p className="mt-0.5 truncate text-[13px] text-ink-3">{sub}</p>}
+        {children && <div className="mt-2 flex flex-wrap items-center gap-x-5 gap-y-2">{children}</div>}
+      </div>
+    </li>
+  );
+}
+
+function Upload({ busy, onFile, label, accept = ".pdf,.jpg,.jpeg,.png" }) {
+  return (
+    <label className={`${linkCls} cursor-pointer`}>
+      {busy ? "Otpremanje…" : label}
+      <input type="file" accept={accept} className="hidden" onChange={(e) => onFile(e.target.files?.[0])} />
+    </label>
+  );
+}
+
+function Toggle({ checked, onChange, children }) {
+  return (
+    <label className="flex cursor-pointer items-center gap-2 text-[13px] font-medium text-ink">
+      <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} className="h-4 w-4 accent-neutral-900" />
+      {children}
+    </label>
   );
 }

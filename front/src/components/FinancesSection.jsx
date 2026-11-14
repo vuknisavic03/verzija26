@@ -113,8 +113,8 @@ export default function FinancesSection({ candidates: propCandidates = [] }) {
 
       {/* Header sekcije */}
       <PageHeader
-        title="Finansije i KIR"
-        subtitle="Knjiga izdatih računa: evidencija faktura, obračun po srednjem kursu NBS, IPS QR nalozi i izvoz za knjigovodstvo."
+        title="Finansije"
+        subtitle="Knjiga izdatih računa (KIR), obračun po srednjem kursu NBS."
         action={
           <div className="flex flex-wrap items-center gap-2">
             <SecondaryButton onClick={() => exportKirToCsv(filteredInvoices)}>Izvezi KIR (CSV)</SecondaryButton>
@@ -223,7 +223,7 @@ export default function FinancesSection({ candidates: propCandidates = [] }) {
         <div className="border-b border-line bg-surface px-5 py-3 flex flex-wrap items-center justify-between gap-2">
           <div className="flex items-center gap-2">
             <span className="tabular-nums text-[13px] font-bold text-ink-2">
-              Zvanični registar KIR (Knjiga izdatih računa)
+              Knjiga izdatih računa
             </span>
             <span className="rounded-lg bg-neutral-200 px-3 py-1 text-xs font-medium text-ink-2">
               {filteredInvoices.length} računa
