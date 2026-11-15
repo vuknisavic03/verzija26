@@ -4,7 +4,7 @@
 import { Button } from "../ui";
 import { UploadIcon, SparklesIcon } from "./icons";
 import { StepShell, TaskList, Actions, LinkButton, FileLine, Notice, StatusPill } from "./ui";
-import { getTranslatedFacultyName, getTranslatedStudyYear, openPrintableTranslationWindow } from "../../data/candidateStore";
+import { translationState, getTranslation } from "../../data/candidateStore";
 
 export function buildDocumentTasks(ctx) {
   const {
@@ -19,46 +19,66 @@ export function buildDocumentTasks(ctx) {
     setShowProfileBuilderModal,
     pickCv,
     isUploadingCv,
-    setCvFile,
-    updateCandidateState,
     pickFacultyCert,
     pickPoliceCert,
     isUploadingCert,
-    facultyFile,
-    setFacultyFile,
-    aiTranslationReady,
-    setAiTranslationReady,
-    runAiTranslation,
-    isTranslating,
-    policeFile,
-    setPoliceFile,
-    policeTranslationReady,
-    setPoliceTranslationReady,
-    runPoliceTranslation,
-    isTranslatingPolice,
     openTranslation,
-    flash,
   } = ctx;
 
   const locked = isDocumentsApproved || isDocumentsPending; // dosije je predat — fajlovi se ne menjaju dok traje provera
   const open = (done) => (done ? "done" : locked ? "wait" : "current");
-  const faculty = candidate.facultyCertFileName || facultyFile;
-  const police = candidate.policeCertificateFileName || policeFile;
+  const faculty = candidate.facultyCertFileName;
+  const police = candidate.policeCertificateFileName;
   const av = candidate.availability || {};
 
-  const translationActions = (doc, ready, translating, run, isNext) =>
-    ready ? (
-      <span className="flex flex-wrap items-center gap-x-4 gap-y-1">
-        <span className="text-[13px] font-medium text-emerald-700">Prevod na engleski je spreman</span>
-        <LinkButton onClick={() => openTranslation(doc)}>Pogledaj prevod</LinkButton>
-        <LinkButton onClick={() => openPrintableTranslationWindow(doc, candidate)}>Preuzmi prevod (PDF)</LinkButton>
-      </span>
-    ) : (
-      <Button variant={isNext ? "primary" : "dark"} size="sm" onClick={run} disabled={translating}>
-        <SparklesIcon className="h-4 w-4" />
-        {translating ? "Prevodim…" : "Napravi prevod"}
+  // Stanje dokumenta sa prevodom: original → prevod → kandidat potvrdi → agencija odobri.
+  const docTask = (doc) => {
+    const state = translationState(candidate, doc);
+    return {
+      state:
+        state === "confirmed" || state === "approved"
+          ? "done"
+          : state === "rejected"
+          ? "danger"
+          : locked
+          ? "wait"
+          : "current",
+      status: {
+        missing: "Nema fajla",
+        needed: "Treba prevod",
+        review: "Proveri prevod",
+        confirmed: "Prevod potvrđen",
+        approved: "Prevod odobren",
+        rejected: "Ispravi prevod",
+      }[state],
+      desc: {
+        needed: "Prevedi ga na engleski. Traje do minut.",
+        review: "Prevod je gotov. Uporedi ga sa originalom i potvrdi.",
+        rejected: getTranslation(candidate, doc)?.rejectionReason || "Agencija je vratila prevod.",
+      }[state] || null,
+      translationState: state,
+    };
+  };
+
+  const translationActions = (doc, isNext) => {
+    const state = translationState(candidate, doc);
+    if (state === "confirmed" || state === "approved") {
+      return <LinkButton onClick={() => openTranslation(doc)}>Pogledaj prevod</LinkButton>;
+    }
+    return (
+      <Button
+        variant={state === "rejected" ? "danger" : isNext ? "primary" : "dark"}
+        size="sm"
+        onClick={() => openTranslation(doc)}
+      >
+        {state !== "rejected" && <SparklesIcon className="h-4 w-4" />}
+        {state === "review" ? "Proveri prevod" : state === "rejected" ? "Ispravi prevod" : "Prevedi na engleski"}
       </Button>
     );
+  };
+
+  const facultyTask = docTask("faculty");
+  const policeTask = docTask("police");
 
   return [
     {
@@ -113,25 +133,15 @@ export function buildDocumentTasks(ctx) {
               <UploadIcon className="h-4 w-4" />
               {isUploadingCv ? "Kačenje…" : "Izaberi CV"}
             </Button>
-            <LinkButton
-              onClick={() => {
-                setCvFile("Luka_Jovanovic_CV.pdf");
-                updateCandidateState({ cvFileName: "Luka_Jovanovic_CV.pdf" });
-              }}
-            >
-              Ubaci primer (demo)
-            </LinkButton>
           </Actions>
         ),
     },
     {
       id: "faculty",
       title: "Uverenje o redovnom studiranju",
-      state: open(faculty && aiTranslationReady),
-      status: faculty ? (aiTranslationReady ? "Okačeno i prevedeno" : "Treba prevod") : "Nema fajla",
-      desc: faculty
-        ? `${getTranslatedFacultyName(candidate.faculty || candidate.university || "Fakultet")} · ${getTranslatedStudyYear(candidate.studyYear || "YEAR_2")}`
-        : "Iz studentske službe. Prevod pravimo mi.",
+      state: faculty ? facultyTask.state : open(false),
+      status: facultyTask.status,
+      desc: faculty ? facultyTask.desc : "Iz studentske službe. Na engleski ga prevodiš ovde, u portalu.",
       render: (isNext) =>
         faculty ? (
           <div className="space-y-3">
@@ -142,7 +152,7 @@ export function buildDocumentTasks(ctx) {
                 </LinkButton>
               )}
             </FileLine>
-            {translationActions("faculty", aiTranslationReady, isTranslating, runAiTranslation, isNext)}
+            {translationActions("faculty", isNext)}
           </div>
         ) : (
           <Actions>
@@ -150,63 +160,33 @@ export function buildDocumentTasks(ctx) {
               <UploadIcon className="h-4 w-4" />
               {isUploadingCert ? "Kačenje…" : "Izaberi uverenje"}
             </Button>
-            <LinkButton
-              onClick={() => {
-                setFacultyFile("Uverenje_Ekonomski_BG.pdf");
-                setAiTranslationReady(true);
-                updateCandidateState({
-                  facultyCertFileName: "Uverenje_Ekonomski_BG.pdf",
-                  facultyCertAiTranslation: true,
-                  facultyCertTranslated: true,
-                });
-                flash("Dodat je primer uverenja sa prevodom.");
-              }}
-            >
-              Ubaci primer (demo)
-            </LinkButton>
           </Actions>
         ),
     },
     {
       id: "police",
       title: "Uverenje o nekažnjavanju (MUP)",
-      state: open(police && policeTranslationReady),
-      status: police ? (policeTranslationReady ? "Okačeno i prevedeno" : "Treba prevod") : "Nema fajla",
-      desc: police
-        ? null
-        : "Iz policijske uprave po prebivalištu. Prevod pravimo mi.",
+      state: police ? policeTask.state : open(false),
+      status: policeTask.status,
+      desc: police ? policeTask.desc : "Iz policijske uprave po prebivalištu. Na engleski ga prevodiš ovde, u portalu.",
       render: (isNext) =>
         police ? (
           <div className="space-y-3">
             <FileLine name={police}>
               {!locked && (
-                <LinkButton onClick={pickPoliceCert} className="ml-1">
+                <LinkButton onClick={pickPoliceCert} disabled={isUploadingCert} className="ml-1">
                   Zameni
                 </LinkButton>
               )}
             </FileLine>
-            {translationActions("police", policeTranslationReady, isTranslatingPolice, runPoliceTranslation, isNext)}
+            {translationActions("police", isNext)}
           </div>
         ) : (
           <Actions>
-            <Button variant={isNext ? "primary" : "dark"} size="sm" onClick={pickPoliceCert}>
+            <Button variant={isNext ? "primary" : "dark"} size="sm" onClick={pickPoliceCert} disabled={isUploadingCert}>
               <UploadIcon className="h-4 w-4" />
-              Izaberi uverenje
+              {isUploadingCert ? "Kačenje…" : "Izaberi uverenje"}
             </Button>
-            <LinkButton
-              onClick={() => {
-                setPoliceFile("Uverenje_o_nekaznjavanju_MUP_RS.pdf");
-                setPoliceTranslationReady(true);
-                updateCandidateState({
-                  policeCertificateFileName: "Uverenje_o_nekaznjavanju_MUP_RS.pdf",
-                  policeCertificateUploaded: true,
-                  policeCertificateTranslated: true,
-                });
-                flash("Dodat je primer MUP uverenja sa prevodom.");
-              }}
-            >
-              Ubaci primer (demo)
-            </LinkButton>
           </Actions>
         ),
     },
@@ -267,7 +247,7 @@ export default function Step1Documents({ ctx, quiet, compact }) {
       state={isStep1Done ? "done" : !isRegistrationDone ? "locked" : "current"}
       kicker="Korak 1"
       title="Profil i dokumenta"
-      description="Sve što sponzor i poslodavac traže, redom. Prevode na engleski pravimo mi."
+      description="Sve što sponzor i poslodavac traže, redom. Uverenja prevodiš na engleski ovde, u portalu."
       status={
         <StatusPill tone={isStep1Done ? "done" : isDocumentsRejected ? "danger" : isDocumentsPending ? "wait" : "neutral"}>
           {isStep1Done

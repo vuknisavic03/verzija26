@@ -10,7 +10,7 @@ import {
   readFileAsDataUrl,
   saveCandidateDs160WithBackend,
   getDs160Status,
-  changeCandidateDiscount,
+  translationDone,
   calculateProfileScore,
   reportInstallmentPayment,
   fetchPortalInvoices,
@@ -36,7 +36,6 @@ import ProfileView from "./dashboard/ProfileView";
 
 import SignContractModal from "./dashboard/modals/SignContractModal";
 import Ds160Modal from "./dashboard/modals/Ds160Modal";
-import ChangeDiscountModal from "./dashboard/modals/ChangeDiscountModal";
 import TranslationModal from "./dashboard/modals/TranslationModal";
 import VideoInstructionsModal from "./dashboard/modals/VideoInstructionsModal";
 
@@ -86,9 +85,7 @@ export default function Dashboard({
       setIsYoutubeEditing(!candidateData.youtubeUrl);
       setCvFile(candidateData.cvFileName || null);
       setFacultyFile(candidateData.facultyCertFileName || null);
-      setAiTranslationReady(Boolean(candidateData.facultyCertAiTranslation));
       setPoliceFile(candidateData.policeCertificateFileName || null);
-      setPoliceTranslationReady(Boolean(candidateData.policeCertificateTranslated));
     }
   }, [candidateData]);
 
@@ -102,9 +99,7 @@ export default function Dashboard({
         setIsYoutubeEditing(!data.candidate.youtubeUrl);
         setCvFile(data.candidate.cvFileName || null);
         setFacultyFile(data.candidate.facultyCertFileName || null);
-        setAiTranslationReady(Boolean(data.candidate.facultyCertAiTranslation));
         setPoliceFile(data.candidate.policeCertificateFileName || null);
-        setPoliceTranslationReady(Boolean(data.candidate.policeCertificateTranslated));
       }
     });
   }, [candidateData?.email]);
@@ -118,10 +113,6 @@ export default function Dashboard({
   const [facultyFile, setFacultyFile] = useState(candidate.facultyCertFileName || null);
   const [policeFile, setPoliceFile] = useState(candidate.policeCertificateFileName || null);
 
-  const [isTranslating, setIsTranslating] = useState(false);
-  const [aiTranslationReady, setAiTranslationReady] = useState(Boolean(candidate.facultyCertAiTranslation));
-  const [policeTranslationReady, setPoliceTranslationReady] = useState(Boolean(candidate.policeCertificateTranslated));
-  const [isTranslatingPolice, setIsTranslatingPolice] = useState(false);
   const [showTranslationModal, setShowTranslationModal] = useState(false);
   const [activeTranslationDoc, setActiveTranslationDoc] = useState("faculty"); // "faculty" | "police"
   const policeInputRef = useRef(null);
@@ -268,7 +259,6 @@ export default function Dashboard({
   const [isUploadingCert, setIsUploadingCert] = useState(false);
   const [uploadToast, setUploadToast] = useState("");
   const [showDs160Modal, setShowDs160Modal] = useState(false);
-  const [showChangeDiscountModal, setShowChangeDiscountModal] = useState(false);
   const [showSignContractModal, setShowSignContractModal] = useState(false);
   const [showInvoicesModal, setShowInvoicesModal] = useState(false);
   const [showProfileBuilderModal, setShowProfileBuilderModal] = useState(false);
@@ -423,20 +413,6 @@ export default function Dashboard({
     }
   };
 
-  const handleChangeDiscount = (promoId, extraData = {}) => {
-    const updated = changeCandidateDiscount(candidate.id || candidate.email, promoId, extraData);
-    if (updated) {
-      setCandidate(updated);
-      setShowChangeDiscountModal(false);
-      setUploadToast(
-        promoId === "none" || !promoId
-          ? "Promocija je uklonjena sa vašeg profila."
-          : `Uspešno ste promenili promociju: ${updated.discountNote || "Popust aktiviran"}!`
-      );
-      setTimeout(() => setUploadToast(""), 4500);
-    }
-  };
-
   const handleSaveYoutube = (e) => {
     e.preventDefault();
     if (!youtubeInput.trim()) return;
@@ -473,99 +449,36 @@ export default function Dashboard({
     }
   };
 
-  const handleCertUpload = async (e) => {
+  // Uverenja: original ide na server (šifrovano). Novi original poništava prethodni prevod,
+  // pa se posle otpremanja stanje uvek povlači sa servera.
+  const uploadCertificate = async (e, type, setFile) => {
     const file = e.target.files?.[0];
-    if (file) {
-      const fileName = file.name;
-      setIsUploadingCert(true);
-      setFacultyFile(fileName);
-      setAiTranslationReady(true);
-      const dataUrl = await readFileAsDataUrl(file);
-      updateCandidateState({
-        facultyCertFileName: fileName,
-        facultyCertDataUrl: dataUrl,
-        facultyCertAiTranslation: true,
-        facultyCertUploadedAt: new Date().toISOString(),
-      });
-      try {
-        const res = await uploadDocumentWithBackend(file, "facultyCert", candidate.email, candidate.id);
-        if (res?.fileUrl) {
-          updateCandidateState({ facultyCertUrl: res.fileUrl });
-        }
-        setUploadToast(res?.message || "Uverenje sa fakulteta je uspešno otpremljeno i digitalno verifikovano.");
-      } catch (err) {
-        console.warn("Faculty cert upload error:", err);
-        setUploadToast("Uverenje sa fakulteta je uspešno otpremljeno.");
-      } finally {
-        setIsUploadingCert(false);
-        setAiTranslationReady(true);
-        setTimeout(() => setUploadToast(""), 4500);
-        if (e.target) e.target.value = "";
-      }
+    if (e.target) e.target.value = "";
+    if (!file) return;
+    setIsUploadingCert(true);
+    setFile(file.name);
+    try {
+      const res = await uploadDocumentWithBackend(file, type, candidate.email, candidate.id);
+      const synced = await syncFromBackend();
+      if (synced?.candidate) setCandidate(synced.candidate);
+      setUploadToast(res?.message || "Dokument je otpremljen. Sledeći korak: prevod na engleski.");
+    } catch (err) {
+      console.warn("Certificate upload error:", err);
+      setUploadToast("Dokument nije otpremljen. Pokušaj ponovo.");
+    } finally {
+      setIsUploadingCert(false);
+      setTimeout(() => setUploadToast(""), 4500);
     }
   };
-
-  const runAiTranslation = () => {
-    setIsTranslating(true);
-    setTimeout(() => {
-      setIsTranslating(false);
-      setAiTranslationReady(true);
-      updateCandidateState({ facultyCertAiTranslation: true });
-      setUploadToast("Uverenje sa fakulteta je digitalno verifikovano.");
-      setTimeout(() => setUploadToast(""), 3500);
-    }, 1200);
-  };
-
-  const handlePoliceCertUpload = async (e) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      const fileName = file.name;
-      setIsUploadingCert(true);
-      setPoliceFile(fileName);
-      setPoliceTranslationReady(true);
-      const dataUrl = await readFileAsDataUrl(file);
-      updateCandidateState({
-        policeCertificateFileName: fileName,
-        policeCertificateDataUrl: dataUrl,
-        policeCertificateUploaded: true,
-        policeCertificateTranslated: true,
-        policeCertificateUploadedAt: new Date().toISOString(),
-      });
-      try {
-        const res = await uploadDocumentWithBackend(file, "policeCert", candidate.email, candidate.id);
-        if (res?.fileUrl) {
-          updateCandidateState({ policeCertificateUrl: res.fileUrl });
-        }
-        setUploadToast(res?.message || "Uverenje o nekažnjavanju iz MUP-a je otpremljeno i pripremljeno za prevod.");
-      } catch (err) {
-        console.warn("Police cert upload error:", err);
-        setUploadToast("Uverenje o nekažnjavanju iz MUP-a je otpremljeno.");
-      } finally {
-        setIsUploadingCert(false);
-        setPoliceTranslationReady(true);
-        setTimeout(() => setUploadToast(""), 4500);
-        if (e.target) e.target.value = "";
-      }
-    }
-  };
-
-  const runPoliceTranslation = () => {
-    setIsTranslatingPolice(true);
-    setTimeout(() => {
-      setIsTranslatingPolice(false);
-      setPoliceTranslationReady(true);
-      updateCandidateState({ policeCertificateTranslated: true });
-      setUploadToast("Zvanični sertifikovan prevod Uverenja iz MUP-a je završen.");
-      setTimeout(() => setUploadToast(""), 4000);
-    }, 1200);
-  };
+  const handleCertUpload = (e) => uploadCertificate(e, "facultyCert", setFacultyFile);
+  const handlePoliceCertUpload = (e) => uploadCertificate(e, "policeCert", setPoliceFile);
 
   const isRequirementsMet = Boolean(
     candidate.youtubeUrl &&
       candidate.cvFileName &&
       candidate.facultyCertFileName &&
-      aiTranslationReady &&
-      (candidate.policeCertificateFileName || policeFile)
+      translationDone(candidate, "faculty") &&
+      translationDone(candidate, "police")
   );
 
   const handleSubmitForReview = () => {
@@ -673,7 +586,6 @@ export default function Dashboard({
     setShowSignContractModal,
     handlePaymentSlipClick,
     handleReportFirstInstallment,
-    setShowChangeDiscountModal,
     // Korak 1
     isStep1Done,
     isDocumentsApproved,
@@ -696,18 +608,6 @@ export default function Dashboard({
     pickFacultyCert,
     pickPoliceCert,
     isUploadingCert,
-    facultyFile,
-    setFacultyFile,
-    aiTranslationReady,
-    setAiTranslationReady,
-    runAiTranslation,
-    isTranslating,
-    policeFile,
-    setPoliceFile,
-    policeTranslationReady,
-    setPoliceTranslationReady,
-    runPoliceTranslation,
-    isTranslatingPolice,
     openTranslation,
     // Korak 2
     isStep2Done,
@@ -981,6 +881,8 @@ export default function Dashboard({
         activeTranslationDoc={activeTranslationDoc}
         setActiveTranslationDoc={setActiveTranslationDoc}
         candidate={candidate}
+        onCandidate={(next) => setCandidate((prev) => ({ ...(prev || {}), ...next }))}
+        pickOriginal={(doc) => (doc === "police" ? pickPoliceCert() : pickFacultyCert())}
       />
 
       {/* MODAL: DS-160 UPITNIK ZA AMBASADU SAD */}
@@ -1030,15 +932,6 @@ export default function Dashboard({
             }
             setTimeout(() => setUploadToast(""), 4500);
           }}
-        />
-      )}
-
-      {/* MODAL: PROMENA POPUSTA / PROMOCIJE */}
-      {showChangeDiscountModal && (
-        <ChangeDiscountModal
-          candidate={candidate}
-          onClose={() => setShowChangeDiscountModal(false)}
-          onSave={handleChangeDiscount}
         />
       )}
 

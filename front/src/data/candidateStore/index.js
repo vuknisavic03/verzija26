@@ -13,3 +13,4 @@ export * from "./siteAndComms.js";
 export * from "./contract.js";
 export * from "./payments.js";
 export * from "./jobs.js";
+export * from "./translations.js";

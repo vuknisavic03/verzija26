@@ -1,7 +1,5 @@
 import fs from 'node:fs'
 import path from 'node:path'
-import { createWorker } from 'tesseract.js'
-import sharp from 'sharp'
 import config from '@payload-config'
 import { getPayload } from 'payload'
 
@@ -12,20 +10,8 @@ import {
   storePortalDocument,
 } from '@/modules/portal-sync/portalDb.ts'
 import { getPortalState, savePortalCandidate } from '@/modules/portal-sync/localStore.ts'
+import { attachUploadedTranslation, clearTranslation, PortalTranslationError } from '@/modules/portal-sync/portalTranslations.ts'
 import { isSameOriginRequest } from '@/modules/security/sameOrigin.ts'
-
-function resolveTesseractWorkerOptions(): { workerPath?: string } {
-  const candidates = [
-    path.resolve(process.cwd(), 'node_modules/tesseract.js/src/worker-script/node/index.js'),
-    path.resolve(process.cwd(), '../../node_modules/tesseract.js/src/worker-script/node/index.js'),
-  ]
-  for (const candidate of candidates) {
-    if (fs.existsSync(candidate)) {
-      return { workerPath: candidate }
-    }
-  }
-  return {}
-}
 
 function json(body: unknown, status = 200) {
   return Response.json(body, {
@@ -119,6 +105,12 @@ export async function POST(request: Request) {
     const candidate = state.candidates.find((c) => String(c.email || '').toLowerCase() === email)
     if (!candidate) return json({ message: 'Kandidat nije pronađen.', success: false }, 404)
 
+    // Posle odobrenja dosijea kandidat ne menja uverenja ni prevode (to bi poništilo odobren prevod).
+    const dossierDocs = ['facultyCert', 'policeCert', 'facultyCertTranslation', 'policeCertTranslation']
+    if (actor.kind === 'candidate' && dossierDocs.includes(docType) && candidate.documentsApproved === true) {
+      return json({ message: 'Dosije je već odobren. Za izmenu dokumenta javi se agenciji.', success: false }, 409)
+    }
+
     // Fajl se čuva šifrovano u bazi (portal-documents), ne na disku kontejnera.
     const rawBytes = Buffer.from(await file.arrayBuffer())
     if (rawBytes.length > MAX_PORTAL_DOCUMENT_BYTES) {
@@ -126,8 +118,11 @@ export async function POST(request: Request) {
     }
     const ext = path.extname(file.name).toLowerCase()
     const mime = file.type || (ext === '.pdf' ? 'application/pdf' : 'image/jpeg')
-    const linkField =
-      docType === 'facultyCert'
+    const translationUpload =
+      docType === 'facultyCertTranslation' ? 'faculty' : docType === 'policeCertTranslation' ? 'police' : null
+    const linkField = translationUpload
+      ? `${docType}Upload`
+      : docType === 'facultyCert'
         ? 'facultyCertUrl'
         : docType === 'signedContract' || docType === 'contract'
           ? 'signedContractUrl'
@@ -157,53 +152,37 @@ export async function POST(request: Request) {
       ? `data:${mime};base64,${rawBytes.toString('base64')}`
       : undefined
 
-    let ocrText = ''
-    let ocrConfidence = 0
-
-    if (docType === 'facultyCert') {
+    // Overen prevod sudskog tumača (umesto AI prevoda).
+    if (translationUpload) {
       try {
-        let imageToOcr = rawBytes
-        try {
-          imageToOcr = await sharp(rawBytes)
-            .resize({ fit: 'inside', width: 1800 })
-            .grayscale()
-            .normalize()
-            .png()
-            .toBuffer()
-        } catch {
-          // Non-image or PDF
-        }
-
-        const worker = await createWorker('eng', 1, resolveTesseractWorkerOptions())
-        try {
-          const res = await worker.recognize(imageToOcr)
-          ocrText = res.data.text.slice(0, 500)
-          ocrConfidence = Math.round(res.data.confidence)
-        } finally {
-          await worker.terminate().catch(() => {})
-        }
-      } catch (err) {
-        console.warn('OCR on facultyCert skipped or failed:', err)
+        await attachUploadedTranslation({ doc: translationUpload, email, fileName: file.name, fileUrl })
+      } catch (error) {
+        if (error instanceof PortalTranslationError) return json({ message: error.message, success: false }, error.status)
+        throw error
       }
+      return json({
+        fileName: file.name,
+        fileUrl,
+        message: 'Prevod je okačen. Agencija će ga proveriti uz original.',
+        success: true,
+      })
+    }
 
-      if (candidate) {
-        await savePortalCandidate({
-          ...candidate,
-          facultyCertAiTranslation: true,
-          facultyCertFileName: file.name,
-          facultyCertUrl: fileUrl,
-          facultyCertDataUrl: undefined,
-          facultyCertUploadedAt: new Date().toISOString(),
-        })
-      }
+    // Novi original poništava prethodni prevod: prevod mora da odgovara tačno ovom fajlu.
+    if (docType === 'facultyCert') {
+      await savePortalCandidate({
+        ...clearTranslation(candidate as never, 'faculty'),
+        facultyCertFileName: file.name,
+        facultyCertUrl: fileUrl,
+        facultyCertDataUrl: undefined,
+        facultyCertUploadedAt: new Date().toISOString(),
+      } as never)
 
       return json({
-        confidence: ocrConfidence,
         fileName: file.name,
         fileUrl,
         previewDataUrl,
-        message: 'Uverenje sa fakulteta je uspešno otpremljeno i digitalno verifikovano.',
-        ocrText,
+        message: 'Uverenje je otpremljeno. Sledeći korak: prevod na engleski.',
         success: true,
       })
     }
@@ -235,21 +214,20 @@ export async function POST(request: Request) {
     if (docType === 'policeCert') {
       if (candidate) {
         await savePortalCandidate({
-          ...candidate,
+          ...clearTranslation(candidate as never, 'police'),
           policeCertificateFileName: file.name,
           policeCertificateUrl: fileUrl,
           policeCertificateDataUrl: undefined,
           policeCertificateUploaded: true,
-          policeCertificateTranslated: true,
           policeCertificateUploadedAt: new Date().toISOString(),
-        })
+        } as never)
       }
 
       return json({
         fileName: file.name,
         fileUrl,
         previewDataUrl,
-        message: 'Uverenje o nekažnjavanju iz MUP-a je uspešno otpremljeno.',
+        message: 'Uverenje iz MUP-a je otpremljeno. Sledeći korak: prevod na engleski.',
         success: true,
       })
     }

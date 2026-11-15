@@ -193,7 +193,15 @@ async function extractDocuments(payload: Payload, candidate: Json, recordKey: st
  * (AES-256-GCM, SENSITIVE_DATA_*). Ostatak koda ih vidi dešifrovane, kao i ranije.
  */
 
-export const SENSITIVE_RECORD_FIELDS = ['jmbg', 'idCardNumber', 'passportNumber', 'guarantor', 'ds160'] as const
+export const SENSITIVE_RECORD_FIELDS = [
+  'jmbg',
+  'idCardNumber',
+  'passportNumber',
+  'guarantor',
+  'ds160',
+  'facultyCertTranslation',
+  'policeCertTranslation',
+] as const
 
 type EncryptedField = { __enc: { authTag: string; ciphertext: string; iv: string; keyId: string } }
 

@@ -50,7 +50,6 @@ export default function PaymentsView({ ctx }) {
     handleReportThirdInstallment,
     setShowInvoicesModal,
     candidateInvoices,
-    setShowChangeDiscountModal,
     slipRequest,
     clearSlipRequest,
   } = ctx;
@@ -231,7 +230,7 @@ export default function PaymentsView({ ctx }) {
 
         <Panel
           title="Popusti i preporuke"
-          aside={<LinkButton onClick={() => setShowChangeDiscountModal(true)}>Promeni popust</LinkButton>}
+          description="Popust dodeljuje agencija. Ako imaš kod ili su se prijatelji prijavili preko tebe, javi nam se."
         >
           <DataList
             cols={1}
@@ -244,7 +243,7 @@ export default function PaymentsView({ ctx }) {
               [
                 "Dovedi prijatelja — 100 $",
                 <span className="flex items-center gap-3 sm:justify-end">
-                  <span className="tabular-nums">{candidate.referralCode || "WT-REF"}</span>
+                  <span className="tabular-nums">{candidate.referralCode || "—"}</span>
                   <LinkButton
                     onClick={() => {
                       navigator.clipboard?.writeText(candidate.referralCode || "");

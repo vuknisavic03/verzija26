@@ -749,14 +749,17 @@ export async function updateLocalCandidateDocument(file, type, email, candidateI
 
   if (type === "facultyCert") {
     c.facultyCertFileName = file.name;
-    c.facultyCertAiTranslation = true;
+    // Novi original poništava prevod; stvarno stanje vraća server.
+    c.facultyCertAiTranslation = false;
+    c.facultyCertTranslation = null;
     c.facultyCertUploadedAt = nowIso;
     if (dataUrl) c.facultyCertDataUrl = dataUrl;
     if (fileUrl) c.facultyCertUrl = fileUrl;
   } else if (type === "policeCert") {
     c.policeCertificateFileName = file.name;
     c.policeCertificateUploaded = true;
-    c.policeCertificateTranslated = true;
+    c.policeCertificateTranslated = false;
+    c.policeCertTranslation = null;
     c.policeCertificateUploadedAt = nowIso;
     if (dataUrl) c.policeCertificateDataUrl = dataUrl;
     if (fileUrl) c.policeCertificateUrl = fileUrl;

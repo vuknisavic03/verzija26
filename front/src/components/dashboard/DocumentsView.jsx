@@ -4,8 +4,10 @@ import { Panel, LinkButton, TaskIcon } from "./ui";
 import {
   downloadContractPdf,
   downloadResponsibilityStatementPdf,
-  openPrintableTranslationWindow,
   getDs160Status,
+  translationState,
+  translationPdfUrl,
+  TRANSLATION_STATUS_LABEL,
 } from "../../data/candidateStore";
 
 const linkCls = "text-[13px] font-medium text-ink underline decoration-line-strong underline-offset-4 hover:decoration-ink";
@@ -60,10 +62,6 @@ export default function DocumentsView({ ctx }) {
     pickCv,
     pickFacultyCert,
     pickPoliceCert,
-    facultyFile,
-    policeFile,
-    aiTranslationReady,
-    policeTranslationReady,
     openTranslation,
     hasConfirmedJob,
     setShowJobOfferModal,
@@ -75,8 +73,24 @@ export default function DocumentsView({ ctx }) {
     setShowProfileBuilderModal,
   } = ctx;
   const ds = getDs160Status(candidate.ds160);
-  const faculty = candidate.facultyCertFileName || facultyFile;
-  const police = candidate.policeCertificateFileName || policeFile;
+  const faculty = candidate.facultyCertFileName;
+  const police = candidate.policeCertificateFileName;
+  const tr = { faculty: translationState(candidate, "faculty"), police: translationState(candidate, "police") };
+  const trTone = (state) =>
+    state === "approved" || state === "confirmed" ? "done" : state === "missing" ? "neutral" : "wait";
+  const trLinks = (doc) =>
+    tr[doc] === "missing" ? null : tr[doc] === "needed" || tr[doc] === "review" || tr[doc] === "rejected" ? (
+      <LinkButton onClick={() => openTranslation(doc)}>
+        {tr[doc] === "needed" ? "Prevedi" : tr[doc] === "review" ? "Proveri prevod" : "Ispravi prevod"}
+      </LinkButton>
+    ) : (
+      <>
+        <LinkButton onClick={() => openTranslation(doc)}>Prevod</LinkButton>
+        <a href={translationPdfUrl(doc)} target="_blank" rel="noreferrer" className={linkCls}>
+          PDF prevoda
+        </a>
+      </>
+    );
   const offerSigned = Boolean(candidate.jobOfferSignedAt || candidate.jobOfferAccepted);
 
   return (
@@ -128,29 +142,19 @@ export default function DocumentsView({ ctx }) {
         <DocRow
           name="Uverenje o redovnom studiranju"
           sub={faculty || "Fajl još nije okačen"}
-          tone={faculty && aiTranslationReady ? "done" : faculty ? "wait" : "neutral"}
-          status={faculty ? (aiTranslationReady ? "Prevedeno" : "Treba prevod") : "Nedostaje"}
+          tone={trTone(tr.faculty)}
+          status={faculty ? TRANSLATION_STATUS_LABEL[tr.faculty] : "Nedostaje"}
         >
-          {faculty && aiTranslationReady && (
-            <>
-              <LinkButton onClick={() => openTranslation("faculty")}>Prevod</LinkButton>
-              <LinkButton onClick={() => openPrintableTranslationWindow("faculty", candidate)}>PDF prevoda</LinkButton>
-            </>
-          )}
+          {trLinks("faculty")}
           <LinkButton onClick={pickFacultyCert}>{faculty ? "Zameni" : "Okači"}</LinkButton>
         </DocRow>
         <DocRow
           name="Uverenje o nekažnjavanju (MUP)"
           sub={police || "Fajl još nije okačen"}
-          tone={police && policeTranslationReady ? "done" : police ? "wait" : "neutral"}
-          status={police ? (policeTranslationReady ? "Prevedeno" : "Treba prevod") : "Nedostaje"}
+          tone={trTone(tr.police)}
+          status={police ? TRANSLATION_STATUS_LABEL[tr.police] : "Nedostaje"}
         >
-          {police && policeTranslationReady && (
-            <>
-              <LinkButton onClick={() => openTranslation("police")}>Prevod</LinkButton>
-              <LinkButton onClick={() => openPrintableTranslationWindow("police", candidate)}>PDF prevoda</LinkButton>
-            </>
-          )}
+          {trLinks("police")}
           <LinkButton onClick={pickPoliceCert}>{police ? "Zameni" : "Okači"}</LinkButton>
         </DocRow>
         <DocRow name="Pasoš" sub={candidate.passportNumber ? `Broj ${candidate.passportNumber}` : "Sken iz registracije"} tone="done" status="Priložen" />

@@ -15,7 +15,11 @@ import {
   portalInvoicePdfUrl,
   formatUsd,
   INSTALLMENT_LABEL,
+  syncFromBackend,
+  translationState,
+  TRANSLATION_STATUS_LABEL,
 } from "../../../data/candidateStore";
+import TranslationReview from "../TranslationReview";
 import { formatRsd } from "../../../data/invoicesStore";
 import ProfileBuilderModal from "../../ProfileBuilderModal";
 import { getJobs } from "../../../data/jobsStore";
@@ -200,18 +204,25 @@ export default function CandidateApplicationModal({ candidate, onSave, onClose }
   const [facultyCertFileName, setFacultyCertFileName] = useState(candidate.facultyCertFileName || "");
   const [facultyCertUrl, setFacultyCertUrl] = useState(candidate.facultyCertUrl || "");
   const [facultyCertDataUrl, setFacultyCertDataUrl] = useState(candidate.facultyCertDataUrl || "");
-  const [facultyCertAiTranslation, setFacultyCertAiTranslation] = useState(
-    Boolean(candidate.facultyCertAiTranslation)
-  );
+  // Prevodi se menjaju samo preko servera; ovde je njihova poslednja poznata verzija.
+  const [liveCandidate, setLiveCandidate] = useState(candidate);
+  useEffect(() => setLiveCandidate(candidate), [candidate]);
+  const refreshLiveCandidate = async () => {
+    const data = await syncFromBackend();
+    const fresh = data?.candidates?.find((c) => c.email?.toLowerCase() === String(email || "").toLowerCase());
+    if (fresh) setLiveCandidate(fresh);
+  };
+  const facultyTr = translationState(liveCandidate, "faculty");
+  const policeTr = translationState(liveCandidate, "police");
+  const translationsApproved = facultyTr === "approved" && policeTr === "approved";
+  const trRowState = (tr) =>
+    tr === "approved" ? "done" : tr === "rejected" ? "danger" : tr === "missing" ? "current" : "wait";
   const [policeCertificateFileName, setPoliceCertificateFileName] = useState(
     candidate.policeCertificateFileName || ""
   );
   const [policeCertificateUrl, setPoliceCertificateUrl] = useState(candidate.policeCertificateUrl || "");
   const [policeCertificateDataUrl, setPoliceCertificateDataUrl] = useState(
     candidate.policeCertificateDataUrl || ""
-  );
-  const [policeCertificateTranslated, setPoliceCertificateTranslated] = useState(
-    Boolean(candidate.policeCertificateTranslated)
   );
   const [signedContractFileName, setSignedContractFileName] = useState(candidate.signedContractFileName || "");
   const [signedContractUrl, setSignedContractUrl] = useState(candidate.signedContractUrl || "");
@@ -378,12 +389,10 @@ export default function CandidateApplicationModal({ candidate, onSave, onClose }
       facultyCertFileName: facultyCertFileName.trim(),
       facultyCertUrl,
       facultyCertDataUrl,
-      facultyCertAiTranslation: Boolean(facultyCertAiTranslation),
       policeCertificateFileName: policeCertificateFileName.trim(),
       policeCertificateUrl,
       policeCertificateDataUrl,
       policeCertificateUploaded: Boolean(policeCertificateFileName.trim()),
-      policeCertificateTranslated: Boolean(policeCertificateTranslated),
       signedContractFileName: signedContractFileName.trim(),
       signedContractUrl,
       signedContractDataUrl,
@@ -593,12 +602,12 @@ export default function CandidateApplicationModal({ candidate, onSave, onClose }
         setFacultyCertFileName(res.fileName);
         if (res.fileUrl) setFacultyCertUrl(res.fileUrl);
         if (res.dataUrl) setFacultyCertDataUrl(res.dataUrl);
-        setFacultyCertAiTranslation(true);
+        await refreshLiveCandidate();
       } else if (type === "policeCert") {
         setPoliceCertificateFileName(res.fileName);
         if (res.fileUrl) setPoliceCertificateUrl(res.fileUrl);
         if (res.dataUrl) setPoliceCertificateDataUrl(res.dataUrl);
-        setPoliceCertificateTranslated(true);
+        await refreshLiveCandidate();
       } else if (type === "passport") {
         setPassportScanFileName(res.fileName);
         if (res.fileUrl) setPassportScanUrl(res.fileUrl);
@@ -1000,8 +1009,8 @@ export default function CandidateApplicationModal({ candidate, onSave, onClose }
                     ["Potpisani ugovor", contractApproved ? "done" : contractSigned ? "wait" : "current"],
                     ["CV", cvFileName ? "done" : "current"],
                     ["Video", youtubeUrl ? "done" : "current"],
-                    ["Uverenje o studiranju", facultyCertFileName ? (facultyCertAiTranslation ? "done" : "wait") : "current"],
-                    ["MUP uverenje", policeCertificateFileName ? (policeCertificateTranslated ? "done" : "wait") : "current"],
+                    ["Uverenje o studiranju", facultyCertFileName ? trRowState(facultyTr) : "current"],
+                    ["MUP uverenje", policeCertificateFileName ? trRowState(policeTr) : "current"],
                     ["DS-160", ds160St.isComplete ? "done" : ds160St.isStarted ? "wait" : "current"],
                   ].map(([n, st]) => (
                     <li key={n} className="flex items-center gap-3 py-2 first:pt-0 last:pb-0">
@@ -1106,8 +1115,8 @@ export default function CandidateApplicationModal({ candidate, onSave, onClose }
                 <DocRow
                   name="Uverenje o studiranju"
                   sub={facultyCertFileName || "Nije okačeno"}
-                  state={facultyCertFileName ? (facultyCertAiTranslation ? "done" : "wait") : "current"}
-                  status={facultyCertFileName ? (facultyCertAiTranslation ? "Sa prevodom" : "Fali prevod") : "Nedostaje"}
+                  state={facultyCertFileName ? trRowState(facultyTr) : "current"}
+                  status={facultyCertFileName ? TRANSLATION_STATUS_LABEL[facultyTr] : "Nedostaje"}
                 >
                   {(facultyCertDataUrl || facultyCertUrl) && (
                     <button
@@ -1119,15 +1128,13 @@ export default function CandidateApplicationModal({ candidate, onSave, onClose }
                     </button>
                   )}
                   <Upload busy={uploadingDocType === "facultyCert"} onFile={(f) => handleAdminDocUpload(f, "facultyCert")} label={facultyCertFileName ? "Zameni" : "Okači"} />
-                  <Toggle checked={facultyCertAiTranslation} onChange={setFacultyCertAiTranslation}>
-                    Prevod gotov
-                  </Toggle>
+                  <TranslationReview candidate={liveCandidate} doc="faculty" onCandidate={setLiveCandidate} showToast={showToast} />
                 </DocRow>
                 <DocRow
                   name="Uverenje o nekažnjavanju (MUP)"
                   sub={policeCertificateFileName || "Nije okačeno"}
-                  state={policeCertificateFileName ? (policeCertificateTranslated ? "done" : "wait") : "current"}
-                  status={policeCertificateFileName ? (policeCertificateTranslated ? "Sa prevodom" : "Fali prevod") : "Nedostaje"}
+                  state={policeCertificateFileName ? trRowState(policeTr) : "current"}
+                  status={policeCertificateFileName ? TRANSLATION_STATUS_LABEL[policeTr] : "Nedostaje"}
                 >
                   {(policeCertificateDataUrl || policeCertificateUrl) && (
                     <button
@@ -1141,9 +1148,7 @@ export default function CandidateApplicationModal({ candidate, onSave, onClose }
                     </button>
                   )}
                   <Upload busy={uploadingDocType === "policeCert"} onFile={(f) => handleAdminDocUpload(f, "policeCert")} label={policeCertificateFileName ? "Zameni" : "Okači"} />
-                  <Toggle checked={policeCertificateTranslated} onChange={setPoliceCertificateTranslated}>
-                    Prevod gotov
-                  </Toggle>
+                  <TranslationReview candidate={liveCandidate} doc="police" onCandidate={setLiveCandidate} showToast={showToast} />
                 </DocRow>
               </ul>
 
@@ -1151,12 +1156,20 @@ export default function CandidateApplicationModal({ candidate, onSave, onClose }
                 <p className="mt-4 text-[13px] text-red-700">Razlog za dopunu: {documentsRejectionReason}</p>
               )}
               <div className="mt-5 flex flex-wrap items-center gap-2 border-t border-line pt-4">
-                <Button size="sm" variant="dark" onClick={() => handleVerifyDocumentsAction(true)}>
+                <Button
+                  size="sm"
+                  variant="dark"
+                  onClick={() => handleVerifyDocumentsAction(true)}
+                  disabled={!documentsApproved && !translationsApproved}
+                >
                   {documentsApproved ? "Odobren" : "Odobri dosije"}
                 </Button>
                 <Button size="sm" variant="outline" onClick={rejectDocs}>
                   Vrati na dopunu
                 </Button>
+                {!documentsApproved && !translationsApproved && (
+                  <span className="text-[13px] text-ink-3">Dosije se odobrava kad odobriš oba prevoda.</span>
+                )}
               </div>
             </Section>
 

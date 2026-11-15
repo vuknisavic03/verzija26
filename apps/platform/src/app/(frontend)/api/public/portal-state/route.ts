@@ -18,10 +18,12 @@ import {
 import {
   acceptOrGenerateInvitationCode,
   resolvePortalActor,
+  keepServerManagedFields,
   sanitizeCandidateUpdate,
 } from '@/modules/portal-sync/access.ts'
 import { PortalJobError, selectPortalJob } from '@/modules/portal-sync/portalJobActions.ts'
 import { normalizeJobInput, offeredJobsFor, publicJob } from '@/modules/portal-sync/portalJobs.ts'
+import { readTranslation, translationApproved } from '@/modules/portal-sync/portalTranslationRules.ts'
 import { isSameOriginRequest } from '@/modules/security/sameOrigin.ts'
 
 const MAXIMUM_BODY_SIZE = 25 * 1_024 * 1_024
@@ -144,7 +146,23 @@ export async function POST(request: Request) {
     }
 
     if (action === 'saveCandidate') {
-      const candidate = await savePortalCandidate(data)
+      const before = await getPortalState()
+      const email = String(data.email || '').toLowerCase()
+      const existing = (before.candidates.find(
+        (c) => (data.id !== undefined && String(c.id) === String(data.id)) || (email && String(c.email || '').toLowerCase() === email),
+      ) || null) as unknown as Record<string, unknown> | null
+      const next = keepServerManagedFields(data, existing)
+      // Dosije se odobrava tek kad agencija odobri oba prevoda.
+      if (next.documentsApproved === true && existing?.documentsApproved !== true) {
+        const ready = (['faculty', 'police'] as const).every((doc) => translationApproved(readTranslation(next, doc)))
+        if (!ready) {
+          return json(
+            { message: 'Dosije se odobrava tek kad odobriš oba prevoda (uverenje o studiranju i MUP uverenje).' },
+            409,
+          )
+        }
+      }
+      const candidate = await savePortalCandidate(next as never)
       const state = await getPortalState()
       return json({
         candidate,

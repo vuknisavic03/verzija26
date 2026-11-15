@@ -31,5 +31,5 @@ export async function resolvePortalActor(): Promise<PortalActor> {
   return { kind: 'anonymous' }
 }
 
-export { sanitizeCandidateUpdate } from './candidateFields.ts'
+export { keepServerManagedFields, sanitizeCandidateUpdate } from './candidateFields.ts'
 export { acceptOrGenerateInvitationCode, generateInvitationCode } from './invitationCode.ts'

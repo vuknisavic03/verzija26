@@ -8,6 +8,11 @@ const ADMIN_ONLY_FIELDS = new Set([
   'basePrice',
   'discount',
   'discountNote',
+  'discountId',
+  'discountCode',
+  'discountTiming',
+  'discountDetails',
+  'groupCode',
   'finalPrice',
   'packageId',
   'packageName',
@@ -67,7 +72,38 @@ const ADMIN_ONLY_FIELDS = new Set([
   'contractSigned',
   'contractSignedAt',
   'contractSignedReference',
+  // Prevod dokumenata: pravi ga i menja samo server (AI prevod, potvrda, pregled agencije).
+  'facultyCertTranslation',
+  'policeCertTranslation',
+  'translationAttempts',
+  'facultyCertAiTranslation',
+  'facultyCertTranslated',
+  'policeCertificateTranslated',
 ])
+
+/**
+ * Polja koja menjaju samo namenske serverske akcije (prevod). Ni agencija ih ne menja kroz
+ * „Sačuvaj dosije", da otvoren prozor u adminu ne bi pregazio prevod koji je server upravo upisao.
+ */
+const SERVER_MANAGED_FIELDS = [
+  'facultyCertTranslation',
+  'policeCertTranslation',
+  'translationAttempts',
+  'facultyCertAiTranslation',
+  'policeCertificateTranslated',
+] as const
+
+export function keepServerManagedFields(
+  incoming: Record<string, unknown>,
+  existing: Record<string, unknown> | null,
+) {
+  const result = { ...incoming }
+  for (const key of SERVER_MANAGED_FIELDS) {
+    if (existing && key in existing) result[key] = existing[key]
+    else delete result[key]
+  }
+  return result
+}
 
 const ADMIN_ONLY_SUFFIX =
   /(Approved|Verified|VerifiedAt|VerificationStatus|VerificationNote|RejectionReason|RejectedAt|PaidAt|PaidDate|PaidRsd|ExchangeRate|InstallmentPaid|InvoiceNumber)$/

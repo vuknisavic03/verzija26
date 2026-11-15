@@ -25,6 +25,16 @@ const policies = new Map<string, RateLimitPolicy>([
     '/api/candidate-accounts/reset-password',
     { limit: 10, scope: 'candidate-password-reset', windowSeconds: 15 * 60 },
   ],
+  [
+    '/api/public/candidate-accounts/register',
+    { limit: 10, scope: 'candidate-invitation-registration', windowSeconds: 15 * 60 },
+  ],
+  [
+    '/api/public/candidate-invitations/verify',
+    { limit: 20, scope: 'candidate-invitation-verification', windowSeconds: 15 * 60 },
+  ],
+  // AI prevod košta: ograničenje po adresi, uz dnevni limit po kandidatu u samom prevodu.
+  ['/api/public/translations', { limit: 20, scope: 'portal-ai-translation', windowSeconds: 60 * 60 }],
   ['/api/users/login', { limit: 10, scope: 'admin-login', windowSeconds: 15 * 60 }],
   [
     '/api/users/forgot-password',
