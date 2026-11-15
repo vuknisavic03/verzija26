@@ -57,3 +57,11 @@ Desktop.ini
 AGENTS.md
 **/.data/
 dokumentazaswt/
+
+# Javni folderi se objavljuju na sajtu: tabele i izvozi sa podacima kandidata nikad ne idu ovde.
+front/public/**/*.xlsx
+front/public/**/*.xls
+front/public/**/*.csv
+apps/platform/public/**/*.xlsx
+apps/platform/public/**/*.xls
+apps/platform/public/**/*.csv

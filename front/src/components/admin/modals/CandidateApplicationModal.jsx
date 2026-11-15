@@ -1236,9 +1236,6 @@ export default function CandidateApplicationModal({ candidate, onSave, onClose }
                 <a href="/documents/Uplatnica_viziranje.docx" download="Uplatnica_viziranje.docx" className={linkCls}>
                   Uplatnica za vizu (.docx)
                 </a>
-                <a href="/documents/Narudzbenica-avio-karte.pdf" target="_blank" rel="noreferrer" className={linkCls}>
-                  Narudžbenica avio karte
-                </a>
                 <a href="/documents/AA_Instrukcija_za_video_CV.pdf" download className={linkCls}>
                   Uputstvo za video
                 </a>
