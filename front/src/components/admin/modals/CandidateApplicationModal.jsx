@@ -5,23 +5,18 @@ import {
   PROGRAM_PACKAGES,
   getPromotions,
   uploadDocumentWithBackend,
-  confirmInstallmentPayment,
   verifyCandidateContract,
   verifyCandidateDocuments,
   getCandidateStepInfo,
   getDs160Status,
   openPrintableContractWindow,
+  confirmPortalPaymentAdmin,
+  fetchPortalInvoices,
+  portalInvoicePdfUrl,
+  formatUsd,
+  INSTALLMENT_LABEL,
 } from "../../../data/candidateStore";
-import {
-  getInvoicesForCandidate,
-  updateInvoiceStatus,
-  formatEur,
-  formatRsd,
-  getCurrentNbsRate,
-  fetchCurrentNbsRate,
-  PAYMENT_STATUSES,
-} from "../../../data/invoicesStore";
-import NewInvoiceModal from "../../NewInvoiceModal";
+import { formatRsd } from "../../../data/invoicesStore";
 import ProfileBuilderModal from "../../ProfileBuilderModal";
 import { getJobs } from "../../../data/jobsStore";
 import { FIELD_CLS, STATUS_FLOW, PlusIcon, XIcon, Modal, Field } from "../ui";
@@ -146,17 +141,6 @@ export default function CandidateApplicationModal({ candidate, onSave, onClose }
             candidate.firstPaymentStatus === "paid"))
     )
   );
-  const [currentNbsRate, setCurrentNbsRate] = useState(() => getCurrentNbsRate("EUR"));
-
-  useEffect(() => {
-    let active = true;
-    fetchCurrentNbsRate("EUR").then((rate) => {
-      if (active && rate) setCurrentNbsRate(rate);
-    });
-    return () => {
-      active = false;
-    };
-  }, []);
   const [adminToast, setAdminToast] = useState("");
   const [previewDoc, setPreviewDoc] = useState(null);
   const [rejectionModal, setRejectionModal] = useState(null);
@@ -260,13 +244,22 @@ export default function CandidateApplicationModal({ candidate, onSave, onClose }
   const [notes, setNotes] = useState(candidate.notes || "");
 
   // 7. Fakture kandidata (KIR)
-  const [candidateInvoices, setCandidateInvoices] = useState(() =>
-    getInvoicesForCandidate(candidate.id, candidate.email)
-  );
-  const [showCreateInvoiceModal, setShowCreateInvoiceModal] = useState(false);
-
+  // Fakture izdaje server pri potvrdi uplate (zajednička KIR numeracija).
+  const [candidateInvoices, setCandidateInvoices] = useState([]);
   const refreshCandidateInvoices = () => {
-    setCandidateInvoices(getInvoicesForCandidate(candidate.id, candidate.email));
+    if (!candidate.email) return;
+    fetchPortalInvoices(candidate.email).then(setCandidateInvoices);
+  };
+  useEffect(() => {
+    refreshCandidateInvoices();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [candidate.email]);
+
+  // Potvrda uplate: datum prijema, kurs NBS (prazno = automatski za taj dan), poziv na broj.
+  const [payForm, setPayForm] = useState(null);
+  const openPayForm = (num) => {
+    setActiveTab("pay");
+    setPayForm({ num, receivedAt: new Date().toISOString().slice(0, 10), rate: "", reference: "", busy: false, error: "" });
   };
 
   const selectedPackage = PROGRAM_PACKAGES.find((p) => p.id === packageId) || PROGRAM_PACKAGES[0];
@@ -480,21 +473,29 @@ export default function CandidateApplicationModal({ candidate, onSave, onClose }
     );
   };
 
-  const handleConfirmInstallmentAction = (instNum) => {
-    const todayDate = new Date().toISOString().slice(0, 10);
-    const rate = currentNbsRate || 117.1524;
+  const handleConfirmInstallmentAction = async (instNum, form) => {
     const isFullAction =
       instNum === "full" ||
       instNum === "FULL" ||
       instNum === 0 ||
       (paymentMethod === "now" && (instNum === 1 || instNum === "1"));
+    const installment = isFullAction ? "FULL" : String(instNum);
 
-    confirmInstallmentPayment(candidate.id || email, isFullAction ? "FULL" : instNum, {
-      exchangeRate: rate,
-      paidDate: todayDate,
+    setPayForm((f) => (f ? { ...f, busy: true, error: "" } : f));
+    const result = await confirmPortalPaymentAdmin({
+      email: candidate.email,
+      installment,
+      receivedAt: form.receivedAt,
+      exchangeRate: form.rate,
+      reference: form.reference,
     });
-    let nextStatus = status;
+    if (!result.ok) {
+      setPayForm((f) => (f ? { ...f, busy: false, error: result.error } : f));
+      return;
+    }
+    const server = result.candidate || {};
 
+    let nextStatus = status;
     if (isFullAction) {
       setIsFullPaymentPaid(true);
       setFirstInstallmentStatus("paid");
@@ -503,108 +504,46 @@ export default function CandidateApplicationModal({ candidate, onSave, onClose }
       setSecondInstallmentPaid(true);
       setThirdInstallmentStatus("paid");
       setThirdInstallmentPaid(true);
-      if (contractApproved && (status === "review" || status === "applying")) {
-        nextStatus = "docs";
-        setStatus("docs");
-      }
-      if (hasJob && (status === "job" || status === "docs" || status === "review")) {
-        nextStatus = "departure";
-        setStatus("departure");
-      }
-      if (ds2019Status === "LOCKED") setDs2019Status("IN_PROGRESS");
-    } else if (instNum === 1 || instNum === "1") {
+      if (contractApproved && (status === "review" || status === "applying")) nextStatus = "docs";
+      if (hasJob && (status === "job" || status === "docs" || status === "review")) nextStatus = "departure";
+    } else if (installment === "1") {
       setFirstInstallmentStatus("paid");
       setFirstInstallmentApproved(true);
-      if (contractApproved && (status === "review" || status === "applying")) {
-        nextStatus = "docs";
-        setStatus("docs");
-      }
-    } else if (instNum === 2 || instNum === "2") {
+      if (contractApproved && (status === "review" || status === "applying")) nextStatus = "docs";
+    } else if (installment === "2") {
       setSecondInstallmentStatus("paid");
       setSecondInstallmentPaid(true);
-      if (hasJob && (status === "job" || status === "docs" || status === "review")) {
-        nextStatus = "departure";
-        setStatus("departure");
-      }
-      if (ds2019Status === "LOCKED") setDs2019Status("IN_PROGRESS");
-    } else if (instNum === 3 || instNum === "3") {
+      if (hasJob && (status === "job" || status === "docs" || status === "review")) nextStatus = "departure";
+    } else {
       setThirdInstallmentStatus("paid");
       setThirdInstallmentPaid(true);
     }
+    setStatus(nextStatus);
+    const unlockDs2019 = (isFullAction || installment === "2") && ds2019Status === "LOCKED";
+    if (unlockDs2019) setDs2019Status("IN_PROGRESS");
 
-    const fullRsd = Math.round(finalPrice * rate * 100) / 100;
-    const r1Rsd = Math.round((Number(firstInstallmentAmount) || 250) * rate * 100) / 100;
-    const r2Rsd = Math.round((Number(secondInstallmentAmount) || 400) * rate * 100) / 100;
-    const r3Rsd = Math.round((Number(thirdInstallmentAmount) || Math.max(0, finalPrice - 650)) * rate * 100) / 100;
-
-    const overrides = isFullAction
-      ? {
-          isFullPaymentPaid: true,
-          fullPaymentPaidRsd: fullRsd,
-          fullPaymentExchangeRate: rate,
-          fullPaymentPaidDate: todayDate,
-          firstInstallmentStatus: "paid",
-          firstPaymentStatus: "paid",
-          firstInstallmentApproved: true,
-          firstInstallmentPaidRsd: r1Rsd,
-          firstInstallmentExchangeRate: rate,
-          firstInstallmentPaidDate: todayDate,
-          secondInstallmentStatus: "paid",
-          secondInstallmentPaid: true,
-          secondInstallmentPaidRsd: r2Rsd,
-          secondInstallmentExchangeRate: rate,
-          secondInstallmentPaidDate: todayDate,
-          thirdInstallmentStatus: "paid",
-          thirdInstallmentPaid: true,
-          thirdInstallmentPaidRsd: r3Rsd,
-          thirdInstallmentExchangeRate: rate,
-          thirdInstallmentPaidDate: todayDate,
-          ds2019Status: ds2019Status === "LOCKED" ? "IN_PROGRESS" : ds2019Status,
-          status: nextStatus,
-        }
-      : instNum === 1 || instNum === "1"
-      ? {
-          firstInstallmentStatus: "paid",
-          firstPaymentStatus: "paid",
-          firstInstallmentApproved: true,
-          firstInstallmentPaidRsd: r1Rsd,
-          firstInstallmentExchangeRate: rate,
-          firstInstallmentPaidDate: todayDate,
-          status: nextStatus,
-        }
-      : instNum === 2 || instNum === "2"
-      ? {
-          secondInstallmentStatus: "paid",
-          secondInstallmentPaid: true,
-          secondInstallmentPaidRsd: r2Rsd,
-          secondInstallmentExchangeRate: rate,
-          secondInstallmentPaidDate: todayDate,
-          ds2019Status: ds2019Status === "LOCKED" ? "IN_PROGRESS" : ds2019Status,
-          status: nextStatus,
-        }
-      : {
-          thirdInstallmentStatus: "paid",
-          thirdInstallmentPaid: true,
-          thirdInstallmentPaidRsd: r3Rsd,
-          thirdInstallmentExchangeRate: rate,
-          thirdInstallmentPaidDate: todayDate,
-          status: nextStatus,
-        };
-
-    const updated = buildUpdatedCandidate(overrides);
-
+    // Polja uplate dolaze sa servera; dosije čuva samo korak i DS-2019.
+    const paymentFields = Object.fromEntries(
+      Object.entries(server).filter(([k]) => /^(first|second|third|fullPayment|isFullPayment|firstPayment)/.test(k) || k === "notes")
+    );
+    const updated = {
+      ...buildUpdatedCandidate({
+        status: nextStatus,
+        ...(unlockDs2019 ? { ds2019Status: "IN_PROGRESS" } : {}),
+      }),
+      ...paymentFields,
+    };
+    if (server.notes) setNotes(server.notes);
     onSave(updated, { keepOpen: true });
     refreshCandidateInvoices();
+    setPayForm(null);
 
-    if (isFullAction) {
-      showToast(`Uplata programa u celosti (${finalPrice} € / ${fullRsd.toLocaleString("sr-RS")} RSD) je proknjižena i evidentirana u KIR! Fiksiran kurs NBS: ${rate.toFixed(4)}.`);
-    } else if (instNum === 1 && nextStatus === "docs") {
-      showToast(`I rata (${firstInstallmentAmount} € / ${r1Rsd.toLocaleString("sr-RS")} RSD) potvrđena i evidentirana u KIR! Kandidat je automatski prebačen na Korak 1: Dokumenta.`);
-    } else if (instNum === 2 && nextStatus === "departure") {
-      showToast(`II rata (${secondInstallmentAmount} € / ${r2Rsd.toLocaleString("sr-RS")} RSD) potvrđena i evidentirana u KIR! Kandidat je automatski prebačen na Čekanje na vizu.`);
-    } else {
-      showToast(`Uplata ${instNum}. rate je uspešno potvrđena i evidentirana u Knjizi izdatih računa (KIR)!`);
-    }
+    const label = INSTALLMENT_LABEL[installment] || `${installment}. rata`;
+    showToast(
+      result.alreadyConfirmed
+        ? `${label} je već potvrđena (faktura ${result.invoiceNumber}).`
+        : `${label} je potvrđena. Izdata je faktura ${result.invoiceNumber}.`
+    );
   };
 
   const handleVerifyDocumentsAction = (approved, reason = "") => {
@@ -716,21 +655,15 @@ export default function CandidateApplicationModal({ candidate, onSave, onClose }
 
   const remainingEur = Math.max(0, finalPrice - totalPaidEur);
 
+  // Dinarski iznos postoji samo za potvrđene uplate (po kursu zaključanom pri potvrdi).
   const totalPaidRsd = isFull
     ? isFullPaymentPaid || firstInstallmentApproved
-      ? candidate.fullPaymentPaidRsd || Math.round(finalPrice * (candidate.fullPaymentExchangeRate || currentNbsRate) * 100) / 100
+      ? Number(candidate.fullPaymentPaidRsd) || 0
       : 0
-    : (firstInstallmentApproved
-        ? candidate.firstInstallmentPaidRsd || Math.round(r1Amount * (candidate.firstInstallmentExchangeRate || currentNbsRate) * 100) / 100
-        : 0) +
-      (secondInstallmentPaid
-        ? candidate.secondInstallmentPaidRsd || Math.round(r2Amount * (candidate.secondInstallmentExchangeRate || currentNbsRate) * 100) / 100
-        : 0) +
-      (thirdInstallmentPaid
-        ? candidate.thirdInstallmentPaidRsd || Math.round(r3Amount * (candidate.thirdInstallmentExchangeRate || currentNbsRate) * 100) / 100
-        : 0);
+    : (firstInstallmentApproved ? Number(candidate.firstInstallmentPaidRsd) || 0 : 0) +
+      (secondInstallmentPaid ? Number(candidate.secondInstallmentPaidRsd) || 0 : 0) +
+      (thirdInstallmentPaid ? Number(candidate.thirdInstallmentPaidRsd) || 0 : 0);
 
-  const remainingRsd = Math.round(remainingEur * currentNbsRate * 100) / 100;
 
   // ================================================================
   // PRIKAZ DOSIJEA
@@ -790,10 +723,10 @@ export default function CandidateApplicationModal({ candidate, onSave, onClose }
       firstInstallmentStatus === "pending" && {
         id: "pay1",
         tab: "pay",
-        title: isFull ? `Potvrdi uplatu programa — ${finalPrice} €` : `Potvrdi uplatu I rate — ${r1Amount} €`,
+        title: isFull ? `Potvrdi uplatu programa — ${finalPrice} USD` : `Potvrdi uplatu I rate — ${r1Amount} USD`,
         desc: "Kandidat je prijavio uplatu. Proveri izvod pa proknjiži.",
         actions: (
-          <Button size="sm" variant="dark" onClick={() => handleConfirmInstallmentAction(isFull ? "full" : 1)}>
+          <Button size="sm" variant="dark" onClick={() => openPayForm(isFull ? "full" : 1)}>
             Proknjiži
           </Button>
         ),
@@ -847,10 +780,10 @@ export default function CandidateApplicationModal({ candidate, onSave, onClose }
       !secondInstallmentPaid && {
         id: "pay2",
         tab: "pay",
-        title: `Potvrdi uplatu II rate — ${r2Amount} €`,
+        title: `Potvrdi uplatu II rate — ${r2Amount} USD`,
         desc: "Kandidat je prijavio uplatu.",
         actions: (
-          <Button size="sm" variant="dark" onClick={() => handleConfirmInstallmentAction(2)}>
+          <Button size="sm" variant="dark" onClick={() => openPayForm(2)}>
             Proknjiži
           </Button>
         ),
@@ -860,10 +793,10 @@ export default function CandidateApplicationModal({ candidate, onSave, onClose }
       !thirdInstallmentPaid && {
         id: "pay3",
         tab: "pay",
-        title: `Potvrdi uplatu III rate — ${r3Amount} €`,
+        title: `Potvrdi uplatu III rate — ${r3Amount} USD`,
         desc: "Kandidat je prijavio uplatu.",
         actions: (
-          <Button size="sm" variant="dark" onClick={() => handleConfirmInstallmentAction(3)}>
+          <Button size="sm" variant="dark" onClick={() => openPayForm(3)}>
             Proknjiži
           </Button>
         ),
@@ -1051,8 +984,8 @@ export default function CandidateApplicationModal({ candidate, onSave, onClose }
                   cols={1}
                   items={[
                     ["Program", selectedPackage.name],
-                    ["Cena", `${formatEur(finalPrice)}${numDiscount ? ` (popust ${formatEur(numDiscount)})` : ""}`],
-                    ["Plaćeno", `${formatEur(totalPaidEur)} od ${formatEur(finalPrice)}`],
+                    ["Cena", `${formatUsd(finalPrice)}${numDiscount ? ` (popust ${formatUsd(numDiscount)})` : ""}`],
+                    ["Plaćeno", `${formatUsd(totalPaidEur)} od ${formatUsd(finalPrice)}`],
                     ["Posao", selectedJobEmployer ? `${selectedJobTitle} — ${selectedJobEmployer}` : "Nije izabran"],
                     ["Fakultet", faculty || "—"],
                   ]}
@@ -1303,23 +1236,22 @@ export default function CandidateApplicationModal({ candidate, onSave, onClose }
           <div className="space-y-4">
             <dl className={`${cardCls} grid grid-cols-2 divide-line sm:grid-cols-4 sm:divide-x`}>
               {[
-                ["Za uplatu", finalPrice, finalPrice * currentNbsRate, "text-ink"],
-                ["Popust", numDiscount, numDiscount * currentNbsRate, "text-emerald-700"],
-                ["Plaćeno", totalPaidEur, totalPaidRsd, "text-emerald-700"],
-                ["Preostalo", remainingEur, remainingRsd, remainingEur > 0 ? "text-ink" : "text-ink-3"],
+                ["Za uplatu", finalPrice, null, "text-ink"],
+                ["Popust", numDiscount, null, "text-emerald-700"],
+                ["Plaćeno", totalPaidEur, totalPaidRsd || null, "text-emerald-700"],
+                ["Preostalo", remainingEur, null, remainingEur > 0 ? "text-ink" : "text-ink-3"],
               ].map(([k, eur, rsd, tone]) => (
                 <div key={k} className="px-4 py-3.5 sm:px-5">
                   <dt className="text-xs text-ink-3">{k}</dt>
-                  <dd className={`mt-0.5 text-lg font-semibold tabular-nums ${tone}`}>{formatEur(eur)}</dd>
-                  <dd className="text-xs tabular-nums text-ink-3">{formatRsd(rsd)}</dd>
+                  <dd className={`mt-0.5 text-lg font-semibold tabular-nums ${tone}`}>{formatUsd(eur)}</dd>
+                  {rsd ? <dd className="text-xs tabular-nums text-ink-3">{formatRsd(rsd)}</dd> : null}
                 </div>
               ))}
             </dl>
 
             <Section
               title="Uplate"
-              hint="Pri knjiženju se zaključava srednji kurs NBS tog dana i dinarski iznos."
-              aside={<span className="text-[13px] tabular-nums text-ink-3">NBS {Number(currentNbsRate).toFixed(4)}</span>}
+              hint="Potvrdi uplatu kad je vidiš na izvodu. Server zaključava srednji kurs NBS na dan prijema i izdaje fakturu."
             >
               <ul className="divide-y divide-line">
                 {(isFull
@@ -1368,17 +1300,18 @@ export default function CandidateApplicationModal({ candidate, onSave, onClose }
                       },
                     ]
                 ).map((r) => {
-                  const rsd = r.paid && r.paidRsd ? r.paidRsd : Math.round(r.eur * currentNbsRate * 100) / 100;
+                  const rsd = r.paid && r.paidRsd ? r.paidRsd : null;
+                  const formOpen = payForm && String(payForm.num) === String(r.num);
                   const st = r.paid ? "done" : r.status === "pending" ? "wait" : "current";
                   return (
-                    <li key={r.num} className="flex flex-col gap-3 py-4 first:pt-0 last:pb-0 sm:flex-row sm:items-center sm:justify-between">
+                    <li key={r.num} className="flex flex-col gap-3 py-4 first:pt-0 last:pb-0 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
                       <div className="flex min-w-0 gap-3.5">
                         <TaskIcon state={st} className="mt-0.5" />
                         <div className="min-w-0">
                           <p className="text-[15px] font-medium text-ink">{r.title}</p>
                           <p className="mt-0.5 text-[13px] text-ink-3">
                             {r.paid
-                              ? `Proknjiženo ${r.paidDate || ""} · kurs ${Number(r.rate || currentNbsRate).toFixed(4)}`
+                              ? `Proknjiženo ${r.paidDate || ""}${r.rate ? ` · kurs ${Number(r.rate).toFixed(4)}` : ""}`
                               : r.status === "pending"
                               ? "Kandidat je prijavio uplatu"
                               : "Nije plaćeno"}
@@ -1387,36 +1320,62 @@ export default function CandidateApplicationModal({ candidate, onSave, onClose }
                       </div>
                       <div className="flex items-center justify-between gap-4 pl-[2.125rem] sm:pl-0">
                         <div className="text-right">
-                          <p className="text-[15px] font-semibold tabular-nums text-ink">{formatEur(r.eur)}</p>
-                          <p className="text-xs tabular-nums text-ink-3">{formatRsd(rsd)}</p>
+                          <p className="text-[15px] font-semibold tabular-nums text-ink">{formatUsd(r.eur)}</p>
+                          {rsd ? <p className="text-xs tabular-nums text-ink-3">{formatRsd(rsd)}</p> : null}
                         </div>
-                        {!r.paid && (
-                          <Button size="sm" variant={r.status === "pending" ? "dark" : "outline"} onClick={() => handleConfirmInstallmentAction(r.num)}>
+                        {!r.paid && !formOpen && (
+                          <Button size="sm" variant={r.status === "pending" ? "dark" : "outline"} onClick={() => openPayForm(r.num)}>
                             Proknjiži
                           </Button>
                         )}
                       </div>
+                      {formOpen && (
+                        <div className="w-full rounded-xl bg-surface p-4 sm:basis-full">
+                          <div className="grid gap-3 sm:grid-cols-3">
+                            <Field label="Datum prijema uplate">
+                              <input
+                                type="date"
+                                value={payForm.receivedAt}
+                                max={new Date().toISOString().slice(0, 10)}
+                                onChange={(e) => setPayForm((f) => ({ ...f, receivedAt: e.target.value }))}
+                                className={FIELD_CLS}
+                              />
+                            </Field>
+                            <Field label="Srednji kurs NBS (USD)">
+                              <input
+                                type="text"
+                                inputMode="decimal"
+                                placeholder="Automatski za taj dan"
+                                value={payForm.rate}
+                                onChange={(e) => setPayForm((f) => ({ ...f, rate: e.target.value }))}
+                                className={`${FIELD_CLS} tabular-nums`}
+                              />
+                            </Field>
+                            <Field label="Poziv na broj / izvod">
+                              <input
+                                type="text"
+                                maxLength={160}
+                                value={payForm.reference}
+                                onChange={(e) => setPayForm((f) => ({ ...f, reference: e.target.value }))}
+                                className={FIELD_CLS}
+                              />
+                            </Field>
+                          </div>
+                          {payForm.error && <p className="mt-3 text-[13px] text-red-700">{payForm.error}</p>}
+                          <div className="mt-4 flex flex-wrap items-center justify-end gap-2">
+                            <Button size="sm" variant="ghost" onClick={() => setPayForm(null)} disabled={payForm.busy}>
+                              Otkaži
+                            </Button>
+                            <Button size="sm" variant="dark" onClick={() => handleConfirmInstallmentAction(r.num, payForm)} disabled={payForm.busy || !payForm.receivedAt}>
+                              {payForm.busy ? "Izdajem fakturu…" : `Potvrdi ${formatUsd(r.eur)} i izdaj fakturu`}
+                            </Button>
+                          </div>
+                        </div>
+                      )}
                     </li>
                   );
                 })}
               </ul>
-              <div className="mt-5 flex flex-wrap items-center gap-3 border-t border-line pt-4">
-                <span className="text-[13px] text-ink-3">Status prve uplate ručno:</span>
-                <select
-                  value={firstPaid ? "paid" : firstInstallmentStatus}
-                  onChange={(e) => {
-                    const val = e.target.value;
-                    setFirstInstallmentStatus(val);
-                    setFirstInstallmentApproved(val === "paid");
-                    if (isFull) setIsFullPaymentPaid(val === "paid");
-                  }}
-                  className={`${FIELD_CLS} max-w-56 py-1.5`}
-                >
-                  <option value="unpaid">Nije uplaćeno</option>
-                  <option value="pending">Prijavljena</option>
-                  <option value="paid">Plaćeno</option>
-                </select>
-              </div>
             </Section>
 
             <Section title="Plan plaćanja" hint="Iznosi rata mogu da se prilagode ovom kandidatu.">
@@ -1430,13 +1389,13 @@ export default function CandidateApplicationModal({ candidate, onSave, onClose }
                 </Field>
                 {paymentMethod !== "now" && (
                   <>
-                    <Field label="I rata (€)">
+                    <Field label="I rata (USD)">
                       <input type="number" min="0" step="10" value={firstInstallmentAmount} onChange={(e) => setFirstInstallmentAmount(Number(e.target.value) || 0)} className={FIELD_CLS} />
                     </Field>
-                    <Field label="II rata (€)">
+                    <Field label="II rata (USD)">
                       <input type="number" min="0" step="10" value={secondInstallmentAmount} onChange={(e) => setSecondInstallmentAmount(Number(e.target.value) || 0)} className={FIELD_CLS} />
                     </Field>
-                    <Field label="III rata (€)">
+                    <Field label="III rata (USD)">
                       <div className="flex gap-1.5">
                         <input type="number" min="0" step="10" value={thirdInstallmentAmount} onChange={(e) => setThirdInstallmentAmount(Number(e.target.value) || 0)} className={FIELD_CLS} />
                         <button
@@ -1444,7 +1403,7 @@ export default function CandidateApplicationModal({ candidate, onSave, onClose }
                           onClick={() => {
                             const balanced = Math.max(0, finalPrice - Number(firstInstallmentAmount || 0) - Number(secondInstallmentAmount || 0));
                             setThirdInstallmentAmount(balanced);
-                            showToast(`III rata je podešena na ${balanced} €, da zbir odgovara ceni.`);
+                            showToast(`III rata je podešena na ${balanced} USD, da zbir odgovara ceni.`);
                           }}
                           title="Izračunaj III ratu"
                           className="shrink-0 rounded-lg border border-line-strong px-2.5 text-xs font-medium text-ink hover:bg-surface"
@@ -1458,13 +1417,13 @@ export default function CandidateApplicationModal({ candidate, onSave, onClose }
               </div>
               {paymentMethod !== "now" && (
                 <p className="mt-3 text-[13px] text-ink-3">
-                  Zbir rata {formatEur(firstInstallmentAmount + secondInstallmentAmount + thirdInstallmentAmount)}
+                  Zbir rata {formatUsd(firstInstallmentAmount + secondInstallmentAmount + thirdInstallmentAmount)}
                   {firstInstallmentAmount + secondInstallmentAmount + thirdInstallmentAmount === finalPrice ? (
                     <span className="text-emerald-700"> — odgovara ceni</span>
                   ) : (
                     <span className="text-amber-700">
                       {" "}
-                      — razlika {formatEur(finalPrice - (firstInstallmentAmount + secondInstallmentAmount + thirdInstallmentAmount))}
+                      — razlika {formatUsd(finalPrice - (firstInstallmentAmount + secondInstallmentAmount + thirdInstallmentAmount))}
                     </span>
                   )}
                 </p>
@@ -1477,7 +1436,7 @@ export default function CandidateApplicationModal({ candidate, onSave, onClose }
                   <select value={packageId} onChange={(e) => setPackageId(e.target.value)} className={FIELD_CLS}>
                     {PROGRAM_PACKAGES.map((p) => (
                       <option key={p.id} value={p.id}>
-                        {p.name} ({p.basePrice} €)
+                        {p.name} ({p.basePrice} USD)
                       </option>
                     ))}
                   </select>
@@ -1505,12 +1464,12 @@ export default function CandidateApplicationModal({ candidate, onSave, onClose }
                     <option value="none">Bez promocije / ručno</option>
                     {promotions.map((p) => (
                       <option key={p.id} value={p.id}>
-                        {p.title} (−{p.amount} €)
+                        {p.title} (−{p.amount} USD)
                       </option>
                     ))}
                   </select>
                 </Field>
-                <Field label="Iznos popusta (€)">
+                <Field label="Iznos popusta (USD)">
                   <input type="number" min="0" max={basePrice} value={discount} onChange={(e) => setDiscount(e.target.value)} className={FIELD_CLS} />
                 </Field>
                 <Field label="Napomena o popustu">
@@ -1556,51 +1515,27 @@ export default function CandidateApplicationModal({ candidate, onSave, onClose }
               )}
             </Section>
 
-            <Section
-              title="Računi"
-              hint="Svaka proknjižena uplata automatski dobija račun."
-              aside={
-                <Button size="sm" variant="outline" onClick={() => setShowCreateInvoiceModal(true)}>
-                  <PlusIcon className="h-4 w-4" /> Izdaj račun
-                </Button>
-              }
-            >
+            <Section title="Fakture" hint="Izdaje ih server pri potvrdi uplate. Brojevi su zajednički za KIR.">
               {candidateInvoices.length === 0 ? (
-                <p className="text-sm text-ink-3">Još nema računa.</p>
+                <p className="text-sm text-ink-3">Još nema faktura.</p>
               ) : (
                 <ul className="divide-y divide-line">
-                  {candidateInvoices.map((inv) => {
-                    const st = PAYMENT_STATUSES[inv.status] || PAYMENT_STATUSES.PENDING;
-                    const paid = inv.status === "PAID";
-                    return (
-                      <li key={inv.id} className="flex flex-col gap-2 py-3 first:pt-0 last:pb-0 sm:flex-row sm:items-center sm:justify-between">
-                        <div className="min-w-0">
-                          <p className="truncate text-sm font-medium text-ink">{inv.purpose}</p>
-                          <p className="text-[13px] tabular-nums text-ink-3">
-                            {inv.invoiceNumber} · {formatRsd(inv.totalRsd)}
-                          </p>
-                        </div>
-                        <div className="flex items-center gap-4">
-                          <span className="text-sm font-semibold tabular-nums text-ink">
-                            {inv.originalAmount.toFixed(2)} {inv.currency}
-                          </span>
-                          <StatusText state={paid ? "done" : inv.status === "CANCELLED" ? "locked" : "wait"}>{st.label}</StatusText>
-                          {!paid && inv.status !== "CANCELLED" && (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                updateInvoiceStatus(inv.id, "PAID");
-                                refreshCandidateInvoices();
-                              }}
-                              className={linkCls}
-                            >
-                              Proknjiži
-                            </button>
-                          )}
-                        </div>
-                      </li>
-                    );
-                  })}
+                  {candidateInvoices.map((inv) => (
+                    <li key={inv.id} className="flex flex-col gap-2 py-3 first:pt-0 last:pb-0 sm:flex-row sm:items-center sm:justify-between">
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-medium text-ink">
+                          {inv.invoiceNumber} · {INSTALLMENT_LABEL[inv.installment] || inv.installment}
+                        </p>
+                        <p className="text-[13px] tabular-nums text-ink-3">
+                          {formatUsd(inv.amountUsd)} × {Number(inv.exchangeRate).toFixed(4)} = {formatRsd(inv.settlementRsd)}
+                          {inv.paymentReference ? ` · ${inv.paymentReference}` : ""}
+                        </p>
+                      </div>
+                      <a href={portalInvoicePdfUrl(inv.id)} className={linkCls}>
+                        Preuzmi PDF
+                      </a>
+                    </li>
+                  ))}
                 </ul>
               )}
             </Section>
@@ -2092,19 +2027,6 @@ export default function CandidateApplicationModal({ candidate, onSave, onClose }
         )}
       </form>
 
-      {/* NOVI RAČUN */}
-      {showCreateInvoiceModal && (
-        <NewInvoiceModal
-          isOpen={showCreateInvoiceModal}
-          candidates={[liveCandidateSnapshot]}
-          onClose={() => setShowCreateInvoiceModal(false)}
-          onCreated={() => {
-            refreshCandidateInvoices();
-            setShowCreateInvoiceModal(false);
-            showToast("Račun je izdat.");
-          }}
-        />
-      )}
 
       {/* PREGLED DOKUMENTA */}
       {previewDoc && (

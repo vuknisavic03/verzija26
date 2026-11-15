@@ -4,7 +4,6 @@
 import { CANDIDATES_KEY, INVITATIONS_KEY, loadData, saveData } from "./storage.js";
 import { INITIAL_CANDIDATES, INITIAL_INVITATIONS } from "./mockSeed.js";
 import { getCandidates, getCurrentUser, setCurrentUser } from "./session.js";
-import { ensureCandidateInstallmentInvoice, getCurrentNbsRate } from "../invoicesStore.js";
 
 /**
  * Računa popunjenost studentskog profila i CV-ja za potrebe interne validacije (0-100)
@@ -240,7 +239,7 @@ export function getCandidateStepInfo(candidate) {
     } else if (!r2Paid) {
       subLabel = candidate.paymentMethod === "now"
         ? "Izbor posla i priprema intervjua"
-        : `Čeka uplatu II rate (${candidate.secondInstallmentAmount || 400} €)`;
+        : `Čeka uplatu II rate (${candidate.secondInstallmentAmount || 400} USD)`;
     } else {
       subLabel = candidate.paymentMethod === "now" ? "Posao potvrđen" : "Posao i II rata potvrđeni";
     }
@@ -299,8 +298,8 @@ export function getCandidateStepInfo(candidate) {
     regSubLabel = "I rata prijavljena — čeka potvrdu admina";
   } else if (!r1Paid) {
     regSubLabel = candidate.paymentMethod === "now"
-      ? `Ugovor overen • Čeka uplatu programa u celosti (${candidate.finalPrice || 1750} €)`
-      : `Ugovor overen • Čeka uplatu I rate (${candidate.firstInstallmentAmount || 250} €)`;
+      ? `Ugovor overen • Čeka uplatu programa u celosti (${candidate.finalPrice || 1750} USD)`
+      : `Ugovor overen • Čeka uplatu I rate (${candidate.firstInstallmentAmount || 250} USD)`;
   }
 
   return {
@@ -1008,127 +1007,10 @@ export function reportInstallmentPayment(candidateIdOrEmail, installmentNumber) 
     c.thirdInstallmentReportedAt = nowIso;
   }
 
-  const saved = saveCandidate(c);
-  try {
-    ensureCandidateInstallmentInvoice(saved, isFull ? "FULL" : installmentNumber, "PENDING");
-  } catch {}
-  return saved;
+  // Fakturu izdaje server kad agencija potvrdi uplatu.
+  return saveCandidate(c);
 }
 
-/**
- * Potvrđuje uplatu rate ili uplate u celosti od strane administratora uz trajno zaključavanje NBS kursa i dinarskog iznosa.
- * @param {string} candidateIdOrEmail
- * @param {1 | 2 | 3 | "FULL"} installmentNumber
- * @param {object} options
- */
-export function confirmInstallmentPayment(candidateIdOrEmail, installmentNumber, options = {}) {
-  const candidates = loadData(CANDIDATES_KEY, []);
-  const idx = candidates.findIndex(
-    (c) =>
-      (candidateIdOrEmail && String(c.id) === String(candidateIdOrEmail)) ||
-      (c.email && c.email.toLowerCase() === String(candidateIdOrEmail).toLowerCase())
-  );
-  if (idx < 0) return null;
-
-  const nowIso = new Date().toISOString();
-  const dateStr = new Date().toLocaleDateString("sr-RS");
-  const todayDate = options.paidDate || nowIso.slice(0, 10);
-  const rate = Number(options.exchangeRate) || getCurrentNbsRate("EUR");
-  const c = { ...candidates[idx] };
-
-  const isFull =
-    installmentNumber === "FULL" ||
-    installmentNumber === "full" ||
-    installmentNumber === 0 ||
-    (c.paymentMethod === "now" && (installmentNumber === 1 || installmentNumber === "1"));
-
-  const finalPrice = Number(c.finalPrice) || Number(c.basePrice) || 1750;
-  const r1Amt = Number(c.firstInstallmentAmount) || 250;
-  const r2Amt = Number(c.secondInstallmentAmount) || 400;
-  const r3Amt = Number(c.thirdInstallmentAmount) || Math.max(0, finalPrice - r1Amt - r2Amt);
-
-  if (isFull) {
-    const rsdAmount = Math.round(finalPrice * rate * 100) / 100;
-    c.isFullPaymentPaid = true;
-    c.fullPaymentPaidAt = nowIso;
-    c.fullPaymentPaidDate = todayDate;
-    c.fullPaymentExchangeRate = rate;
-    c.fullPaymentPaidRsd = rsdAmount;
-
-    c.firstInstallmentStatus = "paid";
-    c.firstPaymentStatus = "paid";
-    c.firstInstallmentApproved = true;
-    c.firstInstallmentPaidAt = nowIso;
-    c.firstInstallmentPaidDate = todayDate;
-    c.firstInstallmentExchangeRate = rate;
-    c.firstInstallmentPaidRsd = Math.round(r1Amt * rate * 100) / 100;
-
-    c.secondInstallmentStatus = "paid";
-    c.secondInstallmentPaid = true;
-    c.secondInstallmentApproved = true;
-    c.secondInstallmentPaidAt = nowIso;
-    c.secondInstallmentPaidDate = todayDate;
-    c.secondInstallmentExchangeRate = rate;
-    c.secondInstallmentPaidRsd = Math.round(r2Amt * rate * 100) / 100;
-
-    c.thirdInstallmentStatus = "paid";
-    c.thirdInstallmentPaid = true;
-    c.thirdInstallmentApproved = true;
-    c.thirdInstallmentPaidAt = nowIso;
-    c.thirdInstallmentPaidDate = todayDate;
-    c.thirdInstallmentExchangeRate = rate;
-    c.thirdInstallmentPaidRsd = Math.max(0, rsdAmount - c.firstInstallmentPaidRsd - c.secondInstallmentPaidRsd);
-
-    const note = `[${dateStr}]: Potvrđena uplata programa u celosti (${finalPrice} € po kursu ${rate.toFixed(4)} = ${rsdAmount.toLocaleString("sr-RS")} RSD).`;
-    c.notes = c.notes ? `${c.notes}\n${note}` : note;
-  } else if (installmentNumber === 1 || installmentNumber === "1") {
-    const r1Rsd = Math.round(r1Amt * rate * 100) / 100;
-    c.firstInstallmentStatus = "paid";
-    c.firstPaymentStatus = "paid";
-    c.firstInstallmentApproved = true;
-    c.firstInstallmentPaidAt = nowIso;
-    c.firstInstallmentPaidDate = todayDate;
-    c.firstInstallmentExchangeRate = rate;
-    c.firstInstallmentPaidRsd = r1Rsd;
-    const note = `[${dateStr}]: Potvrđena uplata I rate (${r1Amt} € po kursu ${rate.toFixed(4)} = ${r1Rsd.toLocaleString("sr-RS")} RSD).`;
-    c.notes = c.notes ? `${c.notes}\n${note}` : note;
-  } else if (installmentNumber === 2 || installmentNumber === "2") {
-    const r2Rsd = Math.round(r2Amt * rate * 100) / 100;
-    c.secondInstallmentStatus = "paid";
-    c.secondInstallmentPaid = true;
-    c.secondInstallmentApproved = true;
-    c.secondInstallmentPaidAt = nowIso;
-    c.secondInstallmentPaidDate = todayDate;
-    c.secondInstallmentExchangeRate = rate;
-    c.secondInstallmentPaidRsd = r2Rsd;
-    const note = `[${dateStr}]: Potvrđena uplata II rate (${r2Amt} € po kursu ${rate.toFixed(4)} = ${r2Rsd.toLocaleString("sr-RS")} RSD).`;
-    c.notes = c.notes ? `${c.notes}\n${note}` : note;
-  } else if (installmentNumber === 3 || installmentNumber === "3") {
-    const r3Rsd = Math.round(r3Amt * rate * 100) / 100;
-    c.thirdInstallmentStatus = "paid";
-    c.thirdInstallmentPaid = true;
-    c.thirdInstallmentApproved = true;
-    c.thirdInstallmentPaidAt = nowIso;
-    c.thirdInstallmentPaidDate = todayDate;
-    c.thirdInstallmentExchangeRate = rate;
-    c.thirdInstallmentPaidRsd = r3Rsd;
-    const note = `[${dateStr}]: Potvrđena uplata III (završne) rate programa (${r3Amt} € po kursu ${rate.toFixed(4)} = ${r3Rsd.toLocaleString("sr-RS")} RSD).`;
-    c.notes = c.notes ? `${c.notes}\n${note}` : note;
-  }
-
-  if (c.firstInstallmentApproved && c.secondInstallmentPaid && c.thirdInstallmentPaid) {
-    c.isFullPaymentPaid = true;
-  }
-
-  const saved = saveCandidate(c, options);
-  try {
-    ensureCandidateInstallmentInvoice(saved, isFull ? "FULL" : installmentNumber, "PAID", {
-      exchangeRate: rate,
-      paidDate: todayDate,
-    });
-  } catch {}
-  return saved;
-}
 
 /**
  * Administrativna verifikacija ugovora o posredovanju.

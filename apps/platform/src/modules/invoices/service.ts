@@ -13,7 +13,8 @@ import {
 } from './paymentSlips.ts'
 import { renderPaymentSlipPdf } from './renderPaymentSlipPdf.ts'
 
-function relationId(val: number | { id: number }): number {
+function relationId(val: number | { id: number } | null | undefined): number {
+  if (val === null || val === undefined) return 0
   return typeof val === 'number' ? val : val.id
 }
 
@@ -140,8 +141,11 @@ export async function generateInvoiceForPayment({
   const lastSequence = countResult.docs[0]?.sequenceNumber || 0
   const sequenceNumber = lastSequence + 1
 
-  const defaultScaledRate = 108_500_000 // 108.500000 RSD / USD
-  const actualScaledRate = exchangeRateScaled || defaultScaledRate
+  // Kurs se nikad ne izmišlja: faktura bez stvarnog kursa NBS-a se ne izdaje.
+  if (!exchangeRateScaled || exchangeRateScaled <= 0) {
+    throw new InvoiceServiceError('Unesi srednji kurs NBS-a na dan uplate.', 400)
+  }
+  const actualScaledRate = exchangeRateScaled
   const actualRateDate = exchangeRateDate || payment.receivedAt || now.toISOString()
 
   const invoiceData = prepareCandidateInvoice({

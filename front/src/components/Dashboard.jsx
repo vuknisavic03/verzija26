@@ -1,11 +1,10 @@
 // Dashboard.jsx
-import { useState, useRef, useEffect, useMemo } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useTranslation } from "../i18n/LanguageContext";
 import {
   getCurrentUser,
   saveCandidate,
   syncFromBackend,
-  openPrintablePaymentSlipWindow,
   uploadDocumentWithBackend,
   uploadSignedContractWithBackend,
   readFileAsDataUrl,
@@ -14,18 +13,11 @@ import {
   changeCandidateDiscount,
   calculateProfileScore,
   reportInstallmentPayment,
-  confirmInstallmentPayment,
-  verifyCandidateContract,
-  verifyCandidateDocuments,
+  fetchPortalInvoices,
+  formatUsd,
 } from "../data/candidateStore";
-import {
-  getInvoicesForCandidate,
-  ensureCandidateInstallmentInvoice,
-  getCurrentNbsRate,
-  fetchCurrentNbsRate,
-} from "../data/invoicesStore";
 
-import InvoiceModal from "./InvoiceModal";
+import InvoicesSheet from "./dashboard/modals/InvoicesSheet";
 import ProfileBuilderModal from "./ProfileBuilderModal";
 import JobFairModal from "./JobFairModal";
 import JobOfferModal from "./JobOfferModal";
@@ -279,22 +271,24 @@ export default function Dashboard({
   const [showSignContractModal, setShowSignContractModal] = useState(false);
   const [showInvoicesModal, setShowInvoicesModal] = useState(false);
   const [showProfileBuilderModal, setShowProfileBuilderModal] = useState(false);
-  const [selectedCandidateInvoice, setSelectedCandidateInvoice] = useState(null);
-  const candidateInvoices = useMemo(() => {
-    if (!candidate?.id) return [];
-    let list = getInvoicesForCandidate(candidate.id, candidate.email);
-    if (list.length === 0) {
-      const isFull = candidate.paymentMethod === "now";
-      const isPaid = isFull ? Boolean(candidate.isFullPaymentPaid) : Boolean(candidate.isFirstInstallmentPaid);
-      const initial = ensureCandidateInstallmentInvoice(
-        candidate,
-        isFull ? "FULL" : 1,
-        isPaid ? "PAID" : "PENDING"
-      );
-      if (initial) list = [initial];
-    }
-    return list;
-  }, [candidate, showInvoicesModal]);
+  // Fakture izdaje agencija na serveru pri potvrdi uplate.
+  const [candidateInvoices, setCandidateInvoices] = useState([]);
+  const paidSignature = [
+    candidate?.firstInstallmentStatus,
+    candidate?.secondInstallmentStatus,
+    candidate?.thirdInstallmentStatus,
+    candidate?.isFullPaymentPaid,
+  ].join("|");
+  useEffect(() => {
+    if (!candidate?.email) return;
+    let active = true;
+    fetchPortalInvoices().then((list) => active && setCandidateInvoices(list));
+    return () => {
+      active = false;
+    };
+  }, [candidate?.email, paidSignature, showInvoicesModal]);
+  // Koja uplatnica treba da se otvori kad kandidat dođe na „Uplate" iz koraka.
+  const [slipRequest, setSlipRequest] = useState(null);
   const profileScore = calculateProfileScore(candidate);
   const [showJobFairModal, setShowJobFairModal] = useState(false);
   const [showJobOfferModal, setShowJobOfferModal] = useState(false);
@@ -399,58 +393,8 @@ export default function Dashboard({
     setUploadToast(
       isFull
         ? "Prijavljena uplata programa u celosti. Čeka se potvrda administratora (izvod banke)."
-        : `Prijavljena uplata I rate (${candidate.firstInstallmentAmount || 250} €). Čeka se potvrda administratora (izvod banke).`
+        : `Prijavljena uplata I rate (${formatUsd(candidate.firstInstallmentAmount || 250)}). Čeka se potvrda administratora (izvod banke).`
     );
-    setTimeout(() => setUploadToast(""), 5000);
-  };
-
-  const handleSimulateFirstPaymentConfirm = () => {
-    const isFull = candidate.paymentMethod === "now";
-    confirmInstallmentPayment(candidate.id || candidate.email, isFull ? "FULL" : 1);
-    updateCandidateState({
-      firstInstallmentStatus: "paid",
-      firstPaymentStatus: "paid",
-      firstInstallmentApproved: true,
-      firstInstallmentPaidAt: new Date().toISOString(),
-      ...(isFull
-        ? {
-            isFullPaymentPaid: true,
-            secondInstallmentPaid: true,
-            secondInstallmentApproved: true,
-            thirdInstallmentPaid: true,
-            thirdInstallmentApproved: true,
-          }
-        : {}),
-      progress: Math.max(candidate.progress || 0, 40),
-    });
-    setUploadToast(
-      isFull
-        ? "Administrator je potvrdio uplatu programa u celosti! Registracioni preduslovi su ispunjeni."
-        : `Administrator je potvrdio uplatu I rate (${candidate.firstInstallmentAmount || 250} €)! Registracija je uspešno završena.`
-    );
-    setTimeout(() => setUploadToast(""), 5000);
-  };
-
-  const handleSimulateContractApprove = () => {
-    verifyCandidateContract(candidate.id || candidate.email, true);
-    updateCandidateState({
-      contractVerificationStatus: "approved",
-      contractApproved: true,
-      contractVerifiedAt: new Date().toISOString(),
-    });
-    setUploadToast("Potpisani ugovor je zvanično verifikovan i odobren od strane pravnog tima!");
-    setTimeout(() => setUploadToast(""), 5000);
-  };
-
-  const handleSimulateDocumentsApprove = () => {
-    verifyCandidateDocuments(candidate.id || candidate.email, true);
-    updateCandidateState({
-      documentsVerificationStatus: "approved",
-      documentsApproved: true,
-      status: "job",
-      progress: Math.max(candidate.progress || 0, 75),
-    });
-    setUploadToast("Sponzor i koordinator su odobrili dosije! Otključan je Korak 2 (Izbor poslova i intervjui).");
     setTimeout(() => setUploadToast(""), 5000);
   };
 
@@ -460,21 +404,7 @@ export default function Dashboard({
       secondInstallmentStatus: "pending",
       secondInstallmentReportedAt: new Date().toISOString(),
     });
-    setUploadToast(`Prijavljena uplata II rate (${candidate.secondInstallmentAmount || 400} €). Čeka se knjiženje KIR fakture.`);
-    setTimeout(() => setUploadToast(""), 5000);
-  };
-
-  const handleConfirmSecondInstallment = () => {
-    confirmInstallmentPayment(candidate.id || candidate.email, 2);
-    updateCandidateState({
-      secondInstallmentStatus: "paid",
-      secondInstallmentPaid: true,
-      secondInstallmentApproved: true,
-      secondInstallmentPaidAt: new Date().toISOString(),
-      status: "departure",
-      progress: Math.max(candidate.progress || 0, 89),
-    });
-    setUploadToast("Uplata II rate je proknjižena! Otključan je Korak 3 (Viza, DS-2019 i Ambasada SAD).");
+    setUploadToast(`Prijavljena uplata II rate (${formatUsd(candidate.secondInstallmentAmount || 400)}). Čeka se knjiženje KIR fakture.`);
     setTimeout(() => setUploadToast(""), 5000);
   };
 
@@ -484,19 +414,7 @@ export default function Dashboard({
       thirdInstallmentStatus: "pending",
       thirdInstallmentReportedAt: new Date().toISOString(),
     });
-    setUploadToast(`Prijavljena uplata III rate (${candidate.thirdInstallmentAmount || 450} €). Čeka se potvrda pre preuzimanja vize i avio karte.`);
-    setTimeout(() => setUploadToast(""), 5000);
-  };
-
-  const handleConfirmThirdInstallment = () => {
-    confirmInstallmentPayment(candidate.id || candidate.email, 3);
-    updateCandidateState({
-      thirdInstallmentStatus: "paid",
-      thirdInstallmentPaid: true,
-      thirdInstallmentApproved: true,
-      thirdInstallmentPaidAt: new Date().toISOString(),
-    });
-    setUploadToast("Uplata III rate je potvrđena! Sve finansijske obaveze prema agenciji su izmirene.");
+    setUploadToast(`Prijavljena uplata III rate (${formatUsd(candidate.thirdInstallmentAmount || 450)}). Čeka se potvrda pre preuzimanja vize i avio karte.`);
     setTimeout(() => setUploadToast(""), 5000);
   };
 
@@ -505,8 +423,8 @@ export default function Dashboard({
       setShowSignContractModal(true);
       return;
     }
-    const slipType = candidate.paymentMethod === "now" ? "full" : "rate1";
-    openPrintablePaymentSlipWindow({ id: candidate.id, email: candidate.email, type: slipType });
+    setSlipRequest(candidate.paymentMethod === "now" ? "FULL" : "1");
+    changeView("uplate");
   };
 
   const handleUploadSignedContract = async (file) => {
@@ -741,17 +659,6 @@ export default function Dashboard({
 
   const embedUrl = getYouTubeEmbedUrl(candidate.youtubeUrl);
 
-  // Kurs NBS za dinarske uplatnice (II rata)
-  const [nbsRate, setNbsRate] = useState(() => getCurrentNbsRate("EUR"));
-  useEffect(() => {
-    let active = true;
-    fetchCurrentNbsRate("EUR").then((rate) => {
-      if (active && rate) setNbsRate(rate);
-    });
-    return () => {
-      active = false;
-    };
-  }, []);
 
   // Sekcija portala: "put" (koraci) | "dokumenta" | "uplate" | "podaci"
   const [view, setView] = useState("put");
@@ -801,7 +708,8 @@ export default function Dashboard({
     candidate,
     status,
     t,
-    nbsRate,
+    slipRequest,
+    clearSlipRequest: () => setSlipRequest(null),
     goTo,
     flash,
     // Registracija
@@ -1197,22 +1105,7 @@ export default function Dashboard({
       )}
 
       {/* MODAL: KNJIGA IZDATIH RAČUNA (KIR) / FAKTURE */}
-      {showInvoicesModal && (
-        <InvoiceModal
-          candidate={candidate}
-          isOpen={showInvoicesModal}
-          onClose={() => {
-            setShowInvoicesModal(false);
-            setSelectedCandidateInvoice(null);
-          }}
-          selectedInvoice={selectedCandidateInvoice}
-          onSelectInvoice={(inv) => setSelectedCandidateInvoice(inv)}
-          onPayInvoice={(inv) => {
-            setUploadToast(`Instrukcije i IPS QR nalog za fakturu ${inv.invoiceNumber} su pripremljeni.`);
-            setTimeout(() => setUploadToast(""), 4500);
-          }}
-        />
-      )}
+      {showInvoicesModal && <InvoicesSheet invoices={candidateInvoices} onClose={() => setShowInvoicesModal(false)} />}
 
       {/* MODAL: PROFIL BUILDER (CV, ISKUSTVO, DOSTUPNOST) */}
       {showProfileBuilderModal && (

@@ -1823,10 +1823,10 @@ export interface CandidateInvoice {
   invoiceNumber: string;
   sequenceNumber: number;
   year: number;
-  candidateAccount: number | CandidateAccount;
-  candidateProcess: number | CandidateProcess;
-  preApplication: number | PreApplication;
-  candidatePayment: number | CandidatePayment;
+  candidateAccount?: (number | null) | CandidateAccount;
+  candidateProcess?: (number | null) | CandidateProcess;
+  preApplication?: (number | null) | PreApplication;
+  candidatePayment?: (number | null) | CandidatePayment;
   issuedBy: number | User;
   buyerName: string;
   buyerAddress: string;
@@ -1843,6 +1843,11 @@ export interface CandidateInvoice {
   note?: string | null;
   pdfSha256: string;
   pdfBase64?: string | null;
+  portalRecordKey?: string | null;
+  portalEmail?: string | null;
+  portalInstallment?: string | null;
+  paymentReceivedAt?: string | null;
+  paymentReference?: string | null;
   updatedAt: string;
   createdAt: string;
 }
@@ -3619,6 +3624,11 @@ export interface CandidateInvoicesSelect<T extends boolean = true> {
   note?: T;
   pdfSha256?: T;
   pdfBase64?: T;
+  portalRecordKey?: T;
+  portalEmail?: T;
+  portalInstallment?: T;
+  paymentReceivedAt?: T;
+  paymentReference?: T;
   updatedAt?: T;
   createdAt?: T;
 }

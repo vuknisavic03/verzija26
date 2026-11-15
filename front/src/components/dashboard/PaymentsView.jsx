@@ -1,11 +1,11 @@
 // front/src/components/dashboard/PaymentsView.jsx
 // Sve što ima veze sa novcem, na jednom mestu: plan uplata, uplatnice, računi i popusti.
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Button, cx } from "../ui";
 import { ReceiptIcon } from "./icons";
 import { Panel, LinkButton, DataList, TaskIcon } from "./ui";
-import { formatRsdAmount, generateNbsIpsString } from "../../data/invoicesStore";
-import { openPrintablePaymentSlipWindow, downloadPaymentSlipPdf } from "../../data/candidateStore";
+import { formatUsd } from "../../data/candidateStore";
+import PaymentSlip from "./PaymentSlip";
 import { firstPaymentAmount } from "./Step0Registration";
 import { isPkz, thirdInstallmentAmount } from "./Step3VisaDeparture";
 
@@ -32,108 +32,6 @@ function PaymentRow({ id, title, note, amount, tone, statusLabel, children }) {
   );
 }
 
-/** Uplatnica za II ratu sa automatskim dinarskim iznosom i NBS IPS QR kodom. */
-function Rate2Slip({ candidate, nbsRate }) {
-  const rate2EurAmount = Number(candidate.secondInstallmentAmount) || 400;
-  const rate2RsdAmount = candidate.secondInstallmentPaidRsd
-    ? candidate.secondInstallmentPaidRsd.toLocaleString("sr-RS", { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-    : formatRsdAmount(rate2EurAmount, nbsRate, "EUR");
-  const candShortId = String(candidate.id || "1042").replace(/[^0-9]/g, "").slice(-4) || "1042";
-  const payer = candidate.name || `${candidate.firstName || ""} ${candidate.lastName || ""}`.trim() || "Student Kandidat";
-  const ipsPayload = generateNbsIpsString({
-    account: "160600000072871784",
-    recipient: "American Adventure d.o.o. Beograd",
-    amountRsd: rate2RsdAmount,
-    payer,
-    code: "289",
-    purpose: `Uplata II rate SWT ${candidate.selectedJobEmployer || ""}`.trim().slice(0, 35),
-    model: "97",
-    reference: `AA2026R2${candShortId}`,
-  });
-
-  const box = "rounded-lg border border-line-strong bg-white px-3 py-2";
-  const label = "mb-1 block text-xs text-ink-3";
-
-  return (
-    <div className="rounded-xl border border-line bg-surface p-4 sm:p-5">
-      <div className="grid gap-5 md:grid-cols-[1fr_1fr_auto]">
-        <div className="space-y-3 text-sm">
-          <div>
-            <span className={label}>Uplatilac</span>
-            <div className={box}>
-              <p className="font-medium text-ink">{payer}</p>
-              <p className="text-ink-3">{candidate.address || candidate.homeAddress || candidate.studyCity || "Srbija"}</p>
-            </div>
-          </div>
-          <div>
-            <span className={label}>Svrha uplate</span>
-            <div className={box}>
-              <p className="font-medium text-ink">Uplata II rate programa — Work & Travel USA 2026</p>
-              <p className="text-ink-3">
-                {candidate.selectedJobTitle || "Radna ponuda"} ({candidate.selectedJobEmployer || "poslodavac u SAD"})
-              </p>
-            </div>
-          </div>
-          <div>
-            <span className={label}>Primalac</span>
-            <div className={box}>
-              <p className="font-medium text-ink">American Adventure d.o.o.</p>
-              <p className="text-ink-3">Gospodar Jevremova 59/4, 11000 Beograd</p>
-              <p className="text-xs tabular-nums text-ink-3">PIB 105311717 · MB 20356090</p>
-            </div>
-          </div>
-        </div>
-
-        <div className="space-y-3 text-sm">
-          <div className="grid grid-cols-3 gap-2">
-            <div>
-              <span className={label}>Šifra pl.</span>
-              <div className={cx(box, "text-center tabular-nums font-medium")}>189</div>
-            </div>
-            <div>
-              <span className={label}>Valuta</span>
-              <div className={cx(box, "text-center font-medium")}>RSD</div>
-            </div>
-            <div>
-              <span className={label}>Iznos</span>
-              <div className={cx(box, "text-right font-semibold tabular-nums text-ink")}>{rate2RsdAmount}</div>
-            </div>
-          </div>
-          <div>
-            <span className={label}>Račun primaoca</span>
-            <div className={cx(box, "text-center font-semibold tabular-nums tracking-wide")}>160-6000000728717-84</div>
-          </div>
-          <div className="grid grid-cols-4 gap-2">
-            <div>
-              <span className={label}>Model</span>
-              <div className={cx(box, "text-center tabular-nums font-medium")}>97</div>
-            </div>
-            <div className="col-span-3">
-              <span className={label}>Poziv na broj</span>
-              <div className={cx(box, "text-center tabular-nums font-medium")}>AA-2026-R2-{candShortId}</div>
-            </div>
-          </div>
-          <p className="text-xs leading-relaxed text-ink-3">
-            {rate2EurAmount},00 € × {Number(nbsRate).toFixed(4)} (srednji kurs NBS) = {rate2RsdAmount} RSD
-          </p>
-        </div>
-
-        <div className="flex flex-row items-center gap-4 md:flex-col md:items-center">
-          <img
-            src={`https://api.qrserver.com/v1/create-qr-code/?size=160x160&margin=2&data=${encodeURIComponent(ipsPayload)}`}
-            alt="NBS IPS QR kod za uplatu II rate"
-            className="h-28 w-28 rounded-lg border border-line bg-white"
-            loading="lazy"
-          />
-          <p className="max-w-40 text-xs leading-relaxed text-ink-3 md:text-center">
-            U m-bankingu izaberi „IPS skeniraj“ — podaci se popune sami.
-          </p>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 export default function PaymentsView({ ctx }) {
   const {
     candidate,
@@ -153,10 +51,22 @@ export default function PaymentsView({ ctx }) {
     setShowInvoicesModal,
     candidateInvoices,
     setShowChangeDiscountModal,
-    nbsRate,
+    slipRequest,
+    clearSlipRequest,
   } = ctx;
   const [copied, setCopied] = useState(false);
-  const [showSlip2, setShowSlip2] = useState(false);
+  // Koja uplatnica je otvorena ("1" | "2" | "3" | "FULL").
+  const [openSlip, setOpenSlip] = useState(null);
+  const toggleSlip = (key) => setOpenSlip((cur) => (cur === key ? null : key));
+
+  // Dugme „Uplati“ iz koraka otvara odgovarajuću uplatnicu ovde.
+  useEffect(() => {
+    if (!slipRequest) return;
+    setOpenSlip(slipRequest);
+    clearSlipRequest?.();
+    const row = slipRequest === "2" ? "pay-rate2" : slipRequest === "3" ? "pay-rate3" : "pay-rate1";
+    requestAnimationFrame(() => document.getElementById(row)?.scrollIntoView({ behavior: "smooth", block: "start" }));
+  }, [slipRequest, clearSlipRequest]);
 
   const isFull = candidate.paymentMethod === "now";
   const fullyPaid = isFull || candidate.isFullPaymentPaid;
@@ -188,11 +98,11 @@ export default function PaymentsView({ ctx }) {
     <div className="space-y-4">
       <Panel
         title="Plan uplata"
-        description="U dinarima po srednjem kursu NBS na dan uplate."
+        description="Cene su u USD. Plaćaš u dinarima po srednjem kursu NBS na dan uplate."
         aside={
           <Button variant="outline" size="sm" onClick={() => setShowInvoicesModal(true)} className="h-8 px-3">
             <ReceiptIcon className="h-4 w-4 text-ink-3" />
-            Računi
+            Fakture
             {candidateInvoices.length > 0 && (
               <span className="rounded-full bg-surface-2 px-1.5 text-xs tabular-nums text-ink-2">{candidateInvoices.length}</span>
             )}
@@ -204,14 +114,23 @@ export default function PaymentsView({ ctx }) {
             id="pay-rate1"
             title={isFull ? "Program u celosti" : "I rata"}
             note="Uz potpisan ugovor"
-            amount={`${first} €`}
+            amount={formatUsd(first)}
             {...st(isFirstInstallmentPaid, isFirstInstallmentPending, hasSignedContract)}
           >
             {!isFirstInstallmentPaid && (
-              <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-                <LinkButton onClick={handlePaymentSlipClick}>Uplatnica sa IPS QR kodom</LinkButton>
-                {hasSignedContract && !isFirstInstallmentPending && (
-                  <LinkButton onClick={handleReportFirstInstallment}>Prijavi uplatu</LinkButton>
+              <div className="space-y-3">
+                <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+                  <LinkButton onClick={hasSignedContract ? () => toggleSlip(isFull ? "FULL" : "1") : handlePaymentSlipClick}>
+                    {openSlip === (isFull ? "FULL" : "1") ? "Sakrij uplatnicu" : "Uplatnica sa IPS QR kodom"}
+                  </LinkButton>
+                  {hasSignedContract && !isFirstInstallmentPending && (
+                    <LinkButton onClick={handleReportFirstInstallment}>Prijavi uplatu</LinkButton>
+                  )}
+                </div>
+                {hasSignedContract && openSlip === (isFull ? "FULL" : "1") && (
+                  <div className="-ml-[2.125rem]">
+                    <PaymentSlip installment={isFull ? "FULL" : "1"} />
+                  </div>
                 )}
               </div>
             )}
@@ -222,29 +141,24 @@ export default function PaymentsView({ ctx }) {
               id="pay-rate2"
               title="II rata"
               note="Kad potvrdiš posao (Job Offer)"
-              amount={`${rate2} €`}
+              amount={formatUsd(rate2)}
               {...st(isSecondInstallmentPaid, isSecondInstallmentPending, hasConfirmedJob)}
             >
-              {!isSecondInstallmentPaid && !hasConfirmedJob && !showSlip2 && (
-                <LinkButton onClick={() => setShowSlip2(true)}>Prikaži uplatnicu</LinkButton>
-              )}
-              {!isSecondInstallmentPaid && (hasConfirmedJob || showSlip2) && (
+              {!isSecondInstallmentPaid && (
                 <div className="space-y-3">
-                  <div className="-ml-[2.125rem]">
-                    <Rate2Slip candidate={candidate} nbsRate={nbsRate} />
-                  </div>
                   <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-                    <LinkButton
-                      onClick={() =>
-                        openPrintablePaymentSlipWindow({ id: candidate.id, email: candidate.email, type: "rate2", customRate: nbsRate })
-                      }
-                    >
-                      Odštampaj uplatnicu / PDF
+                    <LinkButton onClick={() => toggleSlip("2")}>
+                      {openSlip === "2" ? "Sakrij uplatnicu" : "Uplatnica sa IPS QR kodom"}
                     </LinkButton>
                     {hasConfirmedJob && !isSecondInstallmentPending && (
                       <LinkButton onClick={handleReportSecondInstallment}>Prijavi uplatu</LinkButton>
                     )}
                   </div>
+                  {openSlip === "2" && (
+                    <div className="-ml-[2.125rem]">
+                      <PaymentSlip installment="2" />
+                    </div>
+                  )}
                 </div>
               )}
             </PaymentRow>
@@ -255,16 +169,25 @@ export default function PaymentsView({ ctx }) {
               id="pay-rate3"
               title={pkz ? "III rata — iz zarade u SAD" : "III rata"}
               note={pkz ? "Plaća se iz prvih plata kod poslodavca" : "Pre preuzimanja pasoša sa vizom"}
-              amount={`${rate3} €`}
+              amount={formatUsd(rate3)}
               {...(pkz
                 ? { tone: "neutral", statusLabel: "PKZ" }
                 : st(isThirdInstallmentPaid, isThirdInstallmentPending, isSecondInstallmentPaid))}
             >
               {!pkz && !isThirdInstallmentPaid && (
-                <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-                  <LinkButton onClick={() => downloadPaymentSlipPdf(candidate.id, candidate.email)}>Uplatnica sa IPS QR kodom</LinkButton>
-                  {isSecondInstallmentPaid && !isThirdInstallmentPending && (
-                    <LinkButton onClick={handleReportThirdInstallment}>Prijavi uplatu</LinkButton>
+                <div className="space-y-3">
+                  <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+                    <LinkButton onClick={() => toggleSlip("3")}>
+                      {openSlip === "3" ? "Sakrij uplatnicu" : "Uplatnica sa IPS QR kodom"}
+                    </LinkButton>
+                    {isSecondInstallmentPaid && !isThirdInstallmentPending && (
+                      <LinkButton onClick={handleReportThirdInstallment}>Prijavi uplatu</LinkButton>
+                    )}
+                  </div>
+                  {openSlip === "3" && (
+                    <div className="-ml-[2.125rem]">
+                      <PaymentSlip installment="3" />
+                    </div>
                   )}
                 </div>
               )}
@@ -275,7 +198,7 @@ export default function PaymentsView({ ctx }) {
             id="pay-visa"
             title="Vizna taksa"
             note="Plaća se Ambasadi SAD, pre razgovora"
-            amount="185 $"
+            amount={formatUsd(185)}
             {...(isReady ? { tone: "done", statusLabel: "Plaćeno" } : { tone: "neutral", statusLabel: "U Koraku 3" })}
           >
             {!isReady && (
@@ -296,9 +219,9 @@ export default function PaymentsView({ ctx }) {
           <DataList
             cols={1}
             items={[
-              ["Ukupno", <span className="tabular-nums">{total} €</span>],
+              ["Ukupno", <span className="tabular-nums">{formatUsd(total)}</span>],
               ["Način plaćanja", modelLabel],
-              ...(candidate.discount > 0 ? [["Uračunat popust", `${candidate.discount} $`]] : []),
+              ...(candidate.discount > 0 ? [["Uračunat popust", formatUsd(candidate.discount)]] : []),
               ...(candidate.guarantor
                 ? [["Jemac", `${candidate.guarantor.name} (${candidate.guarantor.promissoryNotesCount} menice)`]]
                 : []),

@@ -37,7 +37,7 @@ const ADMIN_ONLY_FIELDS = new Set([
 ])
 
 const ADMIN_ONLY_SUFFIX =
-  /(Approved|Verified|VerifiedAt|VerificationStatus|VerificationNote|RejectionReason|RejectedAt|PaidAt|PaidDate|PaidRsd|ExchangeRate|InstallmentPaid)$/
+  /(Approved|Verified|VerifiedAt|VerificationStatus|VerificationNote|RejectionReason|RejectedAt|PaidAt|PaidDate|PaidRsd|ExchangeRate|InstallmentPaid|InvoiceNumber)$/
 
 const PAYMENT_STATUS = /(Installment|Payment)Status$/
 

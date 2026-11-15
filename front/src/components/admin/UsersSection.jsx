@@ -1030,10 +1030,10 @@ export default function UsersSection({ openCandidateId = null, onOpened = () => 
                 </div>
 
                 <div className="text-right">
-                  <p className="text-sm font-semibold text-ink">{inv.finalPrice} €</p>
+                  <p className="text-sm font-semibold text-ink">{inv.finalPrice} USD</p>
                   {inv.discount > 0 && (
                     <p className="text-xs font-medium text-emerald-700">
-                      Popust: -{inv.discount} € {inv.discountNote ? `(${inv.discountNote})` : ""}
+                      Popust: -{inv.discount} USD {inv.discountNote ? `(${inv.discountNote})` : ""}
                     </p>
                   )}
                   <p className="text-2xs text-ink-3 mt-1">

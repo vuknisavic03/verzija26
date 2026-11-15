@@ -170,7 +170,7 @@ export function buildJobTasks(ctx) {
     tasks.push({
       id: "payment2",
       waitText: "Proveravamo uplatu II rate",
-      title: `Uplati II ratu — ${rate2} €`,
+      title: `Uplati II ratu — ${rate2} USD`,
       state: isSecondInstallmentPaid ? "done" : isSecondInstallmentPending ? "wait" : hasConfirmedJob ? "current" : "locked",
       status: isSecondInstallmentPaid
         ? "Proknjiženo"

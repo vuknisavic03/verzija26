@@ -1,342 +1,181 @@
-import React, { useState, useMemo } from "react";
-import { getCandidates } from "../data/candidateStore";
-import {
-  getInvoices,
-  updateInvoiceStatus,
-  cancelInvoice,
-  exportKirToCsv,
-  formatRsd,
-  formatEur,
-  PAYMENT_STATUSES,
-  PAYMENT_METHODS,
-  AGENCY_INFO,
-} from "../data/invoicesStore";
-import InvoiceModal from "./InvoiceModal";
-import NewInvoiceModal from "./NewInvoiceModal";
-import { PageHeader, PrimaryButton, SecondaryButton, PlusIcon, Card } from "./admin/ui";
+// front/src/components/FinancesSection.jsx
+// Finansije: Knjiga izdatih računa (KIR) sa servera. Fakture nastaju samo kad agencija potvrdi
+// uplatu u dosijeu kandidata; ovde se pregledaju, preuzimaju i izvoze. Sve je u USD, sa
+// preračunom u RSD po srednjem kursu NBS na dan prijema uplate.
+import { useEffect, useMemo, useState } from "react";
+import { formatRsd } from "../data/invoicesStore";
+import { formatUsd, INSTALLMENT_LABEL } from "../data/candidateStore";
+import { PageHeader, Card, FIELD_CLS } from "./admin/ui";
 
-export default function FinancesSection({ candidates: propCandidates = [] }) {
-  const candidates = propCandidates.length ? propCandidates : getCandidates();
-  const [invoices, setInvoices] = useState(getInvoices);
+const MONTHS = ["Januar", "Februar", "Mart", "April", "Maj", "Jun", "Jul", "Avgust", "Septembar", "Oktobar", "Novembar", "Decembar"];
+const linkCls = "text-[13px] font-medium text-ink underline decoration-line-strong underline-offset-4 hover:decoration-ink";
+
+function formatDate(iso) {
+  try {
+    return new Date(iso).toLocaleDateString("sr-Latn-RS", { day: "2-digit", month: "2-digit", year: "numeric" });
+  } catch {
+    return "";
+  }
+}
+
+export default function FinancesSection() {
+  const thisYear = new Date().getFullYear();
+  const [year, setYear] = useState(thisYear);
+  const [month, setMonth] = useState("");
   const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState("ALL");
-  const [serviceFilter, setServiceFilter] = useState("ALL");
-  const [selectedInvoice, setSelectedInvoice] = useState(null);
-  const [showNewModal, setShowNewModal] = useState(false);
-  const [toast, setToast] = useState("");
+  const [invoices, setInvoices] = useState(null);
+  const [error, setError] = useState("");
 
-  const showToastMsg = (msg) => {
-    setToast(msg);
-    setTimeout(() => setToast(""), 4000);
-  };
-
-  // Finansijski KPI proračun
-  const stats = useMemo(() => {
-    let totalBilledRsd = 0;
-    let totalPaidRsd = 0;
-    let totalPendingRsd = 0;
-    let totalPkzRsd = 0;
-    let totalPaidEur = 0;
-
-    invoices.forEach((inv) => {
-      if (inv.status === "CANCELLED") return;
-      const rsd = Number(inv.totalRsd) || 0;
-      totalBilledRsd += rsd;
-
-      if (inv.status === "PAID") {
-        totalPaidRsd += rsd;
-        if (inv.currency === "EUR") totalPaidEur += Number(inv.originalAmount) || 0;
-      } else if (inv.status === "PENDING") {
-        totalPendingRsd += rsd;
-      } else if (inv.status === "PKZ_DEFERRED") {
-        totalPkzRsd += rsd;
-      }
-    });
-
-    return {
-      totalBilledRsd,
-      totalPaidRsd,
-      totalPendingRsd,
-      totalPkzRsd,
-      totalPaidEur,
-      count: invoices.length,
+  useEffect(() => {
+    let active = true;
+    setInvoices(null);
+    setError("");
+    fetch(`/api/admin/invoices?year=${year}`, { credentials: "include" })
+      .then(async (res) => {
+        const data = await res.json().catch(() => ({}));
+        if (!active) return;
+        if (!res.ok) {
+          setError(data.message || "Fakture trenutno nisu dostupne.");
+          setInvoices([]);
+          return;
+        }
+        setInvoices(Array.isArray(data.invoices) ? data.invoices : []);
+      })
+      .catch(() => {
+        if (!active) return;
+        setError("Nema veze sa serverom.");
+        setInvoices([]);
+      });
+    return () => {
+      active = false;
     };
-  }, [invoices]);
+  }, [year]);
 
-  // Filtrirane fakture
-  const filteredInvoices = useMemo(() => {
-    return invoices.filter((inv) => {
-      if (statusFilter !== "ALL" && inv.status !== statusFilter) return false;
-      if (serviceFilter !== "ALL" && inv.serviceType !== serviceFilter) return false;
-      if (search.trim()) {
-        const q = search.toLowerCase();
-        const matchNum = inv.invoiceNumber?.toLowerCase().includes(q);
-        const matchName = inv.candidateName?.toLowerCase().includes(q);
-        const matchJmbg = inv.candidateJmbg?.toLowerCase().includes(q);
-        const matchPurpose = inv.purpose?.toLowerCase().includes(q);
-        if (!matchNum && !matchName && !matchJmbg && !matchPurpose) return false;
-      }
-      return true;
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return (invoices || []).filter((inv) => {
+      if (month && new Date(inv.issueDate).getMonth() + 1 !== Number(month)) return false;
+      if (!q) return true;
+      return [inv.invoiceNumber, inv.buyerName, inv.portalEmail, inv.paymentReference]
+        .filter(Boolean)
+        .some((v) => String(v).toLowerCase().includes(q));
     });
-  }, [invoices, statusFilter, serviceFilter, search]);
+  }, [invoices, month, search]);
 
-  const handleStatusChange = (id, newStatus, reason = "") => {
-    if (newStatus === "CANCELLED") {
-      const updated = cancelInvoice(id, reason);
-      setInvoices([...updated]);
-      showToastMsg(`✓ Faktura uspešno stornirana.`);
-    } else {
-      const updated = updateInvoiceStatus(id, newStatus);
-      setInvoices([...updated]);
-      showToastMsg(`✓ Status fakture uspešno promenjen u: ${PAYMENT_STATUSES[newStatus]?.label || newStatus}`);
-    }
-    if (selectedInvoice && selectedInvoice.id === id) {
-      const refreshed = getInvoices().find((i) => i.id === id);
-      setSelectedInvoice(refreshed);
-    }
-  };
+  const totals = useMemo(
+    () =>
+      filtered.reduce(
+        (acc, inv) => ({
+          rsd: acc.rsd + (inv.settlementAmountRsdCents || 0) / 100,
+          usd: acc.usd + (inv.originalCurrency === "USD" ? (inv.originalAmountCents || 0) / 100 : 0),
+        }),
+        { rsd: 0, usd: 0 }
+      ),
+    [filtered]
+  );
 
-  const handleCreated = (newInv) => {
-    setInvoices(getInvoices());
-    showToastMsg(`✓ Uspešno izdata i zavedena nova faktura: ${newInv.invoiceNumber}`);
-    setSelectedInvoice(newInv);
-  };
+  const exportUrl = `/api/admin/kir/export?year=${year}${month ? `&month=${month}` : ""}`;
 
   return (
     <div className="space-y-6">
-      {/* Toast notifikacija */}
-      {toast && (
-        <div className="fixed bottom-6 right-6 z-50 rounded-xl bg-ink px-4 py-3 text-sm font-semibold text-white shadow-xl flex items-center gap-2 border border-neutral-700">
-          <span>{toast}</span>
-        </div>
-      )}
-
-      {/* Header sekcije */}
       <PageHeader
         title="Finansije"
-        subtitle="Knjiga izdatih računa (KIR), obračun po srednjem kursu NBS."
+        subtitle="Knjiga izdatih računa. Faktura nastaje kad potvrdiš uplatu u dosijeu kandidata."
         action={
-          <div className="flex flex-wrap items-center gap-2">
-            <SecondaryButton onClick={() => exportKirToCsv(filteredInvoices)}>Izvezi KIR (CSV)</SecondaryButton>
-            <SecondaryButton onClick={() => window.print()}>Štampaj knjigu</SecondaryButton>
-            <PrimaryButton onClick={() => setShowNewModal(true)}>
-              <PlusIcon />
-              Izdaj račun
-            </PrimaryButton>
-          </div>
+          <a
+            href={exportUrl}
+            className="inline-flex h-10 items-center justify-center gap-2 rounded-full border border-line-strong bg-white px-4.5 text-sm font-semibold text-ink transition-colors duration-150 hover:bg-surface"
+          >
+            Izvezi KIR (Excel)
+          </a>
         }
       />
 
-      {/* KPI finansijske kartice */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         {[
-          { label: "Ukupno fakturisano", value: formatRsd(stats.totalBilledRsd), note: `${stats.count} faktura u knjizi` },
-          { label: "Naplaćeno", value: formatRsd(stats.totalPaidRsd), note: `U devizama: ${formatEur(stats.totalPaidEur)}`, dot: "bg-ink" },
-          { label: "Potraživanja na čekanju", value: formatRsd(stats.totalPendingRsd), note: "Izdate uplatnice, rok 7 dana", dot: "bg-brand" },
-          { label: "PKZ — odloženo (SAD)", value: formatRsd(stats.totalPkzRsd), note: "Otplata kroz III ratu tokom leta" },
-        ].map((k) => (
-          <Card key={k.label} className="px-5 py-4">
-            <p className="flex items-center gap-2 text-[13px] text-ink-3">
-              {k.dot && <span className={`h-2 w-2 rounded-full ${k.dot}`} aria-hidden="true" />}
-              {k.label}
-            </p>
-            <p className="mt-1.5 text-2xl font-semibold tabular-nums text-ink">{k.value}</p>
-            <p className="mt-1 text-xs text-ink-3">{k.note}</p>
+          ["Fakturisano", formatRsd(totals.rsd), `${filtered.length} ${filtered.length === 1 ? "faktura" : "faktura"}`],
+          ["U devizama", formatUsd(totals.usd), "Po ugovorima, u USD"],
+          ["Period", month ? `${MONTHS[Number(month) - 1]} ${year}.` : `${year}. godina`, "Po datumu izdavanja"],
+        ].map(([label, value, note]) => (
+          <Card key={label} className="px-5 py-4">
+            <p className="text-[13px] text-ink-3">{label}</p>
+            <p className="mt-1 text-xl font-semibold tabular-nums text-ink">{value}</p>
+            <p className="mt-0.5 text-xs text-ink-3">{note}</p>
           </Card>
         ))}
       </div>
 
-      {/* Filteri i pretraga */}
-      <Card className="space-y-3 p-4 sm:p-5">
-        <div className="relative w-full sm:max-w-md">
-          <svg className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-          </svg>
+      <Card className="p-4 sm:p-5">
+        <div className="grid gap-3 sm:grid-cols-[1fr_auto_auto]">
           <input
             type="search"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Broj računa, kandidat, JMBG ili svrha"
-            aria-label="Pretraga računa"
-            className="w-full rounded-full border border-line-strong bg-white py-2.5 pl-10 pr-4 text-sm text-ink placeholder:text-ink-3/70 focus:border-ink focus:outline-hidden"
+            placeholder="Broj fakture, ime, email ili poziv na broj"
+            className={FIELD_CLS}
           />
+          <select value={month} onChange={(e) => setMonth(e.target.value)} className={FIELD_CLS}>
+            <option value="">Svi meseci</option>
+            {MONTHS.map((m, i) => (
+              <option key={m} value={i + 1}>
+                {m}
+              </option>
+            ))}
+          </select>
+          <select value={year} onChange={(e) => setYear(Number(e.target.value))} className={FIELD_CLS}>
+            {[thisYear + 1, thisYear, thisYear - 1, thisYear - 2].map((y) => (
+              <option key={y} value={y}>
+                {y}
+              </option>
+            ))}
+          </select>
         </div>
-        {[
-          ["Status", statusFilter, setStatusFilter, [["ALL", "Svi"], ["PAID", "Plaćeno"], ["PENDING", "Na čekanju"], ["PKZ_DEFERRED", "PKZ"], ["CANCELLED", "Stornirano"]]],
-          ["Usluga", serviceFilter, setServiceFilter, [["ALL", "Sve"], ["RATE_1", "I rata"], ["RATE_2", "II rata"], ["RATE_3", "III rata"], ["VISA_FEE", "Vizna taksa"], ["TRANSLATION", "Prevod"]]],
-        ].map(([label, value, set, opts]) => (
-          <div key={label} className="flex items-center gap-3">
-            <span className="w-14 shrink-0 text-[13px] text-ink-3">{label}</span>
-            <div className="no-scrollbar -mr-4 flex gap-1 overflow-x-auto pr-4 sm:mr-0 sm:flex-wrap sm:pr-0">
-              {opts.map(([id, lbl]) => (
-                <button
-                  key={id}
-                  type="button"
-                  onClick={() => set(id)}
-                  className={`shrink-0 rounded-full px-3.5 py-1.5 text-[13px] font-medium transition-colors ${
-                    value === id ? "bg-ink text-white" : "text-ink-3 hover:bg-surface hover:text-ink"
-                  }`}
-                >
-                  {lbl}
-                </button>
-              ))}
-            </div>
-          </div>
-        ))}
       </Card>
 
-      {/* KIR Tabela izdatih računa */}
-      <div className="rounded-2xl border border-line bg-white overflow-hidden">
-        <div className="border-b border-line bg-surface px-5 py-3 flex flex-wrap items-center justify-between gap-2">
-          <div className="flex items-center gap-2">
-            <span className="tabular-nums text-[13px] font-bold text-ink-2">
-              Knjiga izdatih računa
-            </span>
-            <span className="rounded-lg bg-neutral-200 px-3 py-1 text-xs font-medium text-ink-2">
-              {filteredInvoices.length} računa
-            </span>
-          </div>
-          <span className="text-xs text-ink-3 italic">
-            * Stopa PDV: 0% oslobođeno po čl. 24. stav 1. tačka 1. ZPDV
-          </span>
-        </div>
-
-        <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse text-xs">
-            <thead>
-              <tr className="border-b border-line bg-neutral-100/70 text-xs font-bold text-ink-2">
-                <th className="py-3 px-3 text-center w-10">R.br</th>
-                <th className="py-3 px-3">Broj računa</th>
-                <th className="py-3 px-3">Datum prometa</th>
-                <th className="py-3 px-3">Kupac (Student)</th>
-                <th className="py-3 px-3">Svrha / Usluga</th>
-                <th className="py-3 px-3 text-right">Devizni iznos</th>
-                <th className="py-3 px-3 text-right">NBS Kurs</th>
-                <th className="py-3 px-3 text-right">Osnovica (RSD)</th>
-                <th className="py-3 px-3 text-right font-bold">Ukupno RSD</th>
-                <th className="py-3 px-3 text-center">Status</th>
-                <th className="py-3 px-3 text-center">Akcije</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-line">
-              {filteredInvoices.length === 0 ? (
-                <tr>
-                  <td colSpan="11" className="py-8 text-center text-neutral-400">
-                    Nema faktura u izabranoj pretrazi.
-                  </td>
-                </tr>
-              ) : (
-                filteredInvoices.map((inv, idx) => {
-                  const st = PAYMENT_STATUSES[inv.status] || { label: inv.status, badgeCls: "bg-surface-2" };
-                  return (
-                    <tr
-                      key={inv.id}
-                      className="hover:bg-neutral-50/80 transition-colors cursor-pointer"
-                      onClick={() => setSelectedInvoice(inv)}
-                    >
-                      <td className="py-3 px-3 text-center tabular-nums font-semibold text-neutral-400">
-                        {idx + 1}
-                      </td>
-                      <td className="py-3 px-3 tabular-nums font-bold text-ink whitespace-nowrap">
-                        <span className="underline decoration-neutral-300 underline-offset-2 hover:decoration-neutral-900">
-                          {inv.invoiceNumber}
-                        </span>
-                      </td>
-                      <td className="py-3 px-3 whitespace-nowrap tabular-nums text-ink-2">
-                        {inv.deliveryDate}
-                      </td>
-                      <td className="py-3 px-3">
-                        <div className="font-semibold text-ink">{inv.candidateName}</div>
-                        <div className="text-2xs text-ink-3 tabular-nums">
-                          {inv.candidateJmbg || inv.candidateCity || "—"}
-                        </div>
-                      </td>
-                      <td className="py-3 px-3 max-w-xs truncate" title={inv.purpose}>
-                        <div className="font-semibold text-ink truncate">{inv.purpose}</div>
-                        <div className="text-2xs text-ink-3">
-                          {PAYMENT_METHODS[inv.paymentMethod] || inv.paymentMethod}
-                        </div>
-                      </td>
-                      <td className="py-3 px-3 text-right tabular-nums font-semibold text-ink whitespace-nowrap">
-                        {inv.currency === "EUR" ? formatEur(inv.originalAmount) : `${inv.originalAmount} USD`}
-                      </td>
-                      <td className="py-3 px-3 text-right tabular-nums text-ink-2 whitespace-nowrap">
-                        {Number(inv.exchangeRate).toFixed(4)}
-                      </td>
-                      <td className="py-3 px-3 text-right tabular-nums text-ink-2 whitespace-nowrap">
-                        {formatRsd(inv.vatBaseRsd)}
-                      </td>
-                      <td className="py-3 px-3 text-right tabular-nums font-bold text-emerald-700 whitespace-nowrap">
-                        {formatRsd(inv.totalRsd)}
-                      </td>
-                      <td className="py-3 px-3 text-center whitespace-nowrap">
-                        <span className={`inline-block rounded-lg px-3 py-1 text-xs font-medium border ${st.badgeCls}`}>
-                          {st.label}
-                        </span>
-                      </td>
-                      <td className="py-3 px-3 text-center whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
-                        <div className="flex items-center justify-center gap-1.5">
-                          <button
-                            type="button"
-                            title="Pregledaj i odštampaj fakturu"
-                            onClick={() => setSelectedInvoice(inv)}
-                            className="rounded-lg bg-surface-2 p-1.5 text-ink-2 hover:bg-neutral-200 transition-colors"
-                          >
-                            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-                            </svg>
-                          </button>
-                          {inv.status === "PENDING" && (
-                            <button
-                              type="button"
-                              title="Proknjiži uplatu"
-                              onClick={() => handleStatusChange(inv.id, "PAID")}
-                              className="rounded-lg border border-line bg-white p-1.5 text-emerald-700 hover:bg-surface transition-colors"
-                            >
-                              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7" />
-                              </svg>
-                            </button>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      {/* Pravna napomena na dnu */}
-      <div className="rounded-xl border border-line bg-surface p-4 text-xs text-ink-2 flex items-start gap-3">
-        <div className="space-y-1">
-          <p className="font-semibold text-ink">
-            Pravno-računovodstveni standardi agencije:
+      <Card className="overflow-hidden">
+        {invoices === null ? (
+          <p className="px-5 py-8 text-sm text-ink-3">Učitavam fakture…</p>
+        ) : error ? (
+          <p className="px-5 py-8 text-sm text-red-700">{error}</p>
+        ) : filtered.length === 0 ? (
+          <p className="px-5 py-8 text-sm text-ink-3">
+            Nema faktura za izabrani period. Fakture nastaju kad u dosijeu kandidata potvrdiš uplatu.
           </p>
-          <p>
-            {AGENCY_INFO.taxNote} Sve devizne uplate preračunavaju se na dan izdavanja računa po zvaničnom srednjem kursu Narodne banke Srbije (NBS) sa 6 decimala u skladu sa Zakonom o deviznom poslovanju Republike Srbije.
-          </p>
-        </div>
-      </div>
-
-      {/* Modali */}
-      <InvoiceModal
-        invoice={selectedInvoice}
-        isOpen={Boolean(selectedInvoice)}
-        onClose={() => setSelectedInvoice(null)}
-        isAdmin={true}
-        onStatusChange={handleStatusChange}
-      />
-
-      <NewInvoiceModal
-        isOpen={showNewModal}
-        onClose={() => setShowNewModal(false)}
-        candidates={candidates}
-        onCreated={handleCreated}
-      />
+        ) : (
+          <ul className="divide-y divide-line">
+            {filtered.map((inv) => (
+              <li key={inv.id} className="flex flex-col gap-2 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+                <div className="min-w-0">
+                  <p className="text-[15px] font-medium text-ink">
+                    <span className="tabular-nums">{inv.invoiceNumber}</span> · {inv.buyerName}
+                  </p>
+                  <p className="mt-0.5 text-[13px] text-ink-3">
+                    {formatDate(inv.issueDate)}
+                    {inv.portalInstallment ? ` · ${INSTALLMENT_LABEL[inv.portalInstallment] || inv.portalInstallment}` : ""}
+                    {inv.paymentReference ? ` · ${inv.paymentReference}` : ""}
+                  </p>
+                </div>
+                <div className="flex items-center justify-between gap-5 sm:justify-end">
+                  <div className="text-right">
+                    <p className="text-[15px] font-semibold tabular-nums text-ink">
+                      {inv.originalCurrency === "USD"
+                        ? formatUsd(inv.originalAmountCents / 100)
+                        : `${(inv.originalAmountCents / 100).toFixed(2)} ${inv.originalCurrency}`}
+                    </p>
+                    <p className="text-xs tabular-nums text-ink-3">
+                      {formatRsd(inv.settlementAmountRsdCents / 100)}
+                      {inv.exchangeRateScaled ? ` · kurs ${(inv.exchangeRateScaled / 1_000_000).toFixed(4)}` : ""}
+                    </p>
+                  </div>
+                  <a href={`/api/admin/invoices/${inv.id}/download`} className={linkCls}>
+                    PDF
+                  </a>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </Card>
     </div>
   );
 }

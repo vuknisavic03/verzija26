@@ -210,7 +210,7 @@ const CALC_PACKAGES = {
   self: { label: "Self", price: 1875, rate: 14, hours: 40, living: 200 },
 };
 const VISA = 185;
-const FLIGHT = 950; // procena: 600–1.000 € zavisno od destinacije
+const FLIGHT = 950; // procena: $600–1.000 zavisno od destinacije
 
 function Slider({ label, value, min, max, step, onChange, format }) {
   const pct = ((value - min) / (max - min)) * 100;

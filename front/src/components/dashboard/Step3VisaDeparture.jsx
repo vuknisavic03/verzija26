@@ -106,7 +106,7 @@ export function buildVisaTasks(ctx) {
       : pkz
       ? {
           id: "payment3",
-          title: `III rata — ${rate3} € iz plate u SAD`,
+          title: `III rata — ${rate3} USD iz plate u SAD`,
           state: "info",
           status: "PKZ model",
           desc: "Plaća se iz prvih plata u SAD — sada ne uplaćuješ ništa.",
@@ -114,7 +114,7 @@ export function buildVisaTasks(ctx) {
       : {
           id: "payment3",
           waitText: "Proveravamo uplatu III rate",
-          title: `Uplati III ratu — ${rate3} €`,
+          title: `Uplati III ratu — ${rate3} USD`,
           state: isThirdInstallmentPaid ? "done" : isThirdInstallmentPending ? "wait" : lock("current"),
           status: isThirdInstallmentPaid ? "Proknjiženo" : isThirdInstallmentPending ? "Proveravamo uplatu" : "Pre preuzimanja pasoša",
           desc: isThirdInstallmentPaid

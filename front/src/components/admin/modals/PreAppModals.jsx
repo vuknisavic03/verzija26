@@ -533,7 +533,7 @@ export function ProfileReadinessModal({ candidate, onSave, onActivateDirectly, o
               {result.code}
             </p>
             <p className="mt-1 text-xs text-ink-3">
-              Paket: {result.packageName} · Konačna cena: €{result.finalPrice} EUR
+              Paket: {result.packageName} · Konačna cena: {result.finalPrice} USD
             </p>
           </div>
 
@@ -649,7 +649,7 @@ export function ProfileReadinessModal({ candidate, onSave, onActivateDirectly, o
               >
                 {PROGRAM_PACKAGES.map((p) => (
                   <option key={p.id} value={p.id}>
-                    {p.name} (€{p.basePrice})
+                    {p.name} ({p.basePrice} USD)
                   </option>
                 ))}
               </select>
@@ -680,7 +680,7 @@ export function ProfileReadinessModal({ candidate, onSave, onActivateDirectly, o
             <div className="rounded-xl border border-line bg-surface p-3.5 flex items-center justify-between">
               <span className="text-ink-2">Konačna ugovorena cena programa:</span>
               <span className="text-base font-bold text-ink">
-                €{finalPrice} EUR
+                {finalPrice} USD
               </span>
             </div>
           </div>
@@ -965,14 +965,14 @@ export function GenerateCodeModal({ onCreated, onClose }) {
 
           <div className="rounded-2xl border border-line bg-white p-5 text-left text-xs space-y-1 sm:p-6">
             <p><span className="font-semibold">Paket:</span> {generatedResult.packageName}</p>
-            <p><span className="font-semibold">Redovna cena:</span> {generatedResult.basePrice} €</p>
+            <p><span className="font-semibold">Redovna cena:</span> {generatedResult.basePrice} USD</p>
             {generatedResult.discount > 0 && (
               <p className="text-emerald-700 font-semibold">
-                <span>Popust:</span> -{generatedResult.discount} € ({generatedResult.discountNote})
+                <span>Popust:</span> -{generatedResult.discount} USD ({generatedResult.discountNote})
               </p>
             )}
             <p className="font-semibold text-sm text-ink pt-1">
-              Konačna cena: {generatedResult.finalPrice} €
+              Konačna cena: {generatedResult.finalPrice} USD
             </p>
           </div>
         </div>
@@ -1013,7 +1013,7 @@ export function GenerateCodeModal({ onCreated, onClose }) {
             >
               {PROGRAM_PACKAGES.map((pkg) => (
                 <option key={pkg.id} value={pkg.id}>
-                  {pkg.name} — {pkg.basePrice} €
+                  {pkg.name} — {pkg.basePrice} USD
                 </option>
               ))}
             </select>
@@ -1046,11 +1046,11 @@ export function GenerateCodeModal({ onCreated, onClose }) {
           <div className="rounded-xl border border-line bg-surface p-3.5 text-xs">
             <div className="flex justify-between items-center font-semibold text-ink">
               <span>Ukupno za uplatu kandidata:</span>
-              <span className="text-sm">{finalPrice} €</span>
+              <span className="text-sm">{finalPrice} USD</span>
             </div>
             {Number(discount) > 0 && (
               <p className="mt-0.5 text-emerald-700">
-                Uračunat popust od {discount} € ({discountNote || "Odobren popust"})
+                Uračunat popust od {discount} USD ({discountNote || "Odobren popust"})
               </p>
             )}
           </div>

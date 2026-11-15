@@ -39,11 +39,11 @@ export default function Step3PaymentGuarantor({
       <div className="rounded-2xl border border-line bg-white p-5 text-sm sm:p-6">
         <div className="flex items-center justify-between font-semibold text-ink">
           <span>{matchedInvitation?.packageName || "Work & Travel USA — Full Placement"}</span>
-          <span className="text-base">{matchedInvitation?.finalPrice || 1750} €</span>
+          <span className="text-base">{matchedInvitation?.finalPrice || 1750} USD</span>
         </div>
         {matchedInvitation?.discount > 0 && (
           <p className="mt-1 text-xs text-emerald-700">
-            Uračunat popust: -{matchedInvitation.discount} € ({matchedInvitation.discountNote || "Odobren popust"})
+            Uračunat popust: -{matchedInvitation.discount} USD ({matchedInvitation.discountNote || "Odobren popust"})
           </p>
         )}
       </div>

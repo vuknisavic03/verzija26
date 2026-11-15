@@ -42,6 +42,7 @@ import * as migration_20261012_140000_pkz_guarantor from './20261012_140000_pkz_
 import * as migration_20261015_140000_passport_ocr from './20261015_140000_passport_ocr';
 import * as migration_20261101_130000_candidate_invitations_and_applications from './20261101_130000_candidate_invitations_and_applications';
 import * as migration_20261114_175337_portal_storage from './20261114_175337_portal_storage';
+import * as migration_20261115_110724_portal_invoices from './20261115_110724_portal_invoices';
 
 export const migrations = [
   {
@@ -262,6 +263,11 @@ export const migrations = [
   {
     up: migration_20261114_175337_portal_storage.up,
     down: migration_20261114_175337_portal_storage.down,
-    name: '20261114_175337_portal_storage'
+    name: '20261114_175337_portal_storage',
+  },
+  {
+    up: migration_20261115_110724_portal_invoices.up,
+    down: migration_20261115_110724_portal_invoices.down,
+    name: '20261115_110724_portal_invoices'
   },
 ];

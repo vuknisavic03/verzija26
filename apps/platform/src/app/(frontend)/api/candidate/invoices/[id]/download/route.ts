@@ -21,8 +21,11 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
     return Response.json({ message: 'Faktura nije pronađena.' }, { status: 404 })
   }
 
-  const candAccId = typeof invoice.candidateAccount === 'number' ? invoice.candidateAccount : invoice.candidateAccount.id
-  if (candAccId !== auth.user.id) {
+  const candAccId =
+    typeof invoice.candidateAccount === 'number' ? invoice.candidateAccount : (invoice.candidateAccount?.id ?? null)
+  const ownEmail = String((auth.user as { email?: string }).email || '').toLowerCase()
+  const isOwn = candAccId === auth.user.id || (Boolean(invoice.portalEmail) && invoice.portalEmail === ownEmail)
+  if (!isOwn) {
     return Response.json({ message: 'Nemate pristup ovoj fakturi.' }, { status: 403 })
   }
 

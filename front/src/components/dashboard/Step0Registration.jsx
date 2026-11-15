@@ -78,7 +78,7 @@ export function buildRegistrationTasks(ctx) {
     {
       id: "payment1",
       waitText: "Proveravamo tvoju uplatu",
-      title: isFull ? `Uplati program — ${amount} €` : `Uplati I ratu — ${amount} €`,
+      title: isFull ? `Uplati program — ${amount} USD` : `Uplati I ratu — ${amount} USD`,
       state: isFirstInstallmentPaid ? "done" : isFirstInstallmentPending ? "wait" : !hasSignedContract ? "locked" : "current",
       status: isFirstInstallmentPaid
         ? "Proknjiženo"

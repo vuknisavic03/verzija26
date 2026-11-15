@@ -125,12 +125,12 @@ export default function Step1Activation({
               </p>
               {matchedInvitation.discount > 0 && (
                 <p>
-                  <span className="font-semibold">{t("auth.discountApplied")}:</span> -{matchedInvitation.discount} €{" "}
+                  <span className="font-semibold">{t("auth.discountApplied")}:</span> -{matchedInvitation.discount} USD{" "}
                   {matchedInvitation.discountNote ? `(${matchedInvitation.discountNote})` : ""}
                 </p>
               )}
               <p className="pt-1 font-semibold text-emerald-950">
-                Cena programa: {matchedInvitation.finalPrice} € (redovno {matchedInvitation.basePrice} €)
+                Cena programa: {matchedInvitation.finalPrice} USD (redovno {matchedInvitation.basePrice} USD)
               </p>
             </div>
           </div>
@@ -145,12 +145,14 @@ export default function Step1Activation({
               id="reg-pass"
               type="password"
               required
-              minLength={6}
+              minLength={12}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               className={inputCls}
               autoComplete="new-password"
+              aria-describedby="reg-pass-hint"
             />
+            <p id="reg-pass-hint" className="mt-1 text-xs text-ink-3">Najmanje 12 znakova.</p>
           </div>
           <div>
             <label htmlFor="reg-pass-conf" className={labelCls}>
@@ -160,7 +162,7 @@ export default function Step1Activation({
               id="reg-pass-conf"
               type="password"
               required
-              minLength={6}
+              minLength={12}
               value={confirmPassword}
               onChange={(e) => setConfirmPassword(e.target.value)}
               className={inputCls}
