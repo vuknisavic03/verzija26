@@ -5,7 +5,9 @@ import {
   savePortalAnnouncement,
   savePortalCandidate,
   savePortalCandidateDs160,
+  deletePortalJob,
   savePortalFaq,
+  savePortalJob,
   savePortalPromotions,
   savePortalSiteContent,
   signPortalCandidateContract,
@@ -18,6 +20,8 @@ import {
   resolvePortalActor,
   sanitizeCandidateUpdate,
 } from '@/modules/portal-sync/access.ts'
+import { PortalJobError, selectPortalJob } from '@/modules/portal-sync/portalJobActions.ts'
+import { normalizeJobInput, offeredJobsFor, publicJob } from '@/modules/portal-sync/portalJobs.ts'
 import { isSameOriginRequest } from '@/modules/security/sameOrigin.ts'
 
 const MAXIMUM_BODY_SIZE = 25 * 1_024 * 1_024
@@ -55,6 +59,7 @@ export async function GET() {
       candidates: candidate ? [candidate] : [],
       faqItems: state.faqItems,
       invitations: [],
+      jobs: candidate ? offeredJobsFor(candidate as unknown as Record<string, unknown>, state.jobs || []).map(publicJob) : [],
       promotions: state.promotions || [],
       siteContent: state.siteContent,
     })
@@ -65,7 +70,7 @@ export async function GET() {
 }
 
 // Potpis ugovora ide isključivo preko /api/public/contracts/accept (sa dokazom), ne ovde.
-const CANDIDATE_ACTIONS = new Set(['saveCandidate', 'saveDs160'])
+const CANDIDATE_ACTIONS = new Set(['saveCandidate', 'saveDs160', 'selectJob'])
 
 export async function POST(request: Request) {
   if (!isSameOriginRequest(request)) return json({ message: 'Zahtev nije dozvoljen.' }, 403)
@@ -104,6 +109,15 @@ export async function POST(request: Request) {
         )
         const candidate = await savePortalCandidate(clean)
         return json({ candidate, candidates: [candidate], invitations: [] })
+      }
+      if (action === 'selectJob') {
+        try {
+          const candidate = await selectPortalJob(actor.email, String(data.jobId || ''))
+          return json({ candidate, candidates: [candidate] })
+        } catch (error) {
+          if (error instanceof PortalJobError) return json({ message: error.message }, error.status)
+          throw error
+        }
       }
       if (action === 'saveDs160') {
         const answers = (data.ds160 || {}) as Record<string, string>
@@ -173,6 +187,17 @@ export async function POST(request: Request) {
       return json({ siteContent })
     }
 
+    if (action === 'saveJob') {
+      const existing = (await getPortalState()).jobs?.find((j) => j.id === data.id) || null
+      const job = normalizeJobInput(data, existing)
+      if (!job.title || !job.employer) return json({ message: 'Unesi poziciju i poslodavca.' }, 400)
+      const jobs = await savePortalJob(job)
+      return json({ job, jobs })
+    }
+    if (action === 'deleteJob') {
+      const jobs = await deletePortalJob(String(data.id || ''))
+      return json({ jobs })
+    }
     if (action === 'saveFaq') {
       const items = Array.isArray(data.items) ? (data.items as PortalFaqItem[]) : []
       const faqItems = await savePortalFaq(items)

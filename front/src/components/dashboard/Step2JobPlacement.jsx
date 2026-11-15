@@ -2,7 +2,6 @@
 // Korak 2: izbor posla → intervju → Job Offer → II rata. Uplatnica sa QR kodom je u sekciji "Uplate".
 import { Button } from "../ui";
 import { getOfferedJobsForCandidate } from "../../data/jobsStore";
-import { openPrintablePaymentSlipWindow } from "../../data/candidateStore";
 import { StepShell, TaskList, Actions, LinkButton, StatusPill } from "./ui";
 
 export function jobAppStatus(candidate) {
@@ -40,7 +39,7 @@ export function buildJobTasks(ctx) {
     handleReportSecondInstallment,
     setShowJobFairModal,
     setShowJobOfferModal,
-    nbsRate,
+    openPaymentSlip,
     goTo,
   } = ctx;
   const isFull = candidate.paymentMethod === "now" || candidate.isFullPaymentPaid;
@@ -192,9 +191,9 @@ export function buildJobTasks(ctx) {
             <Button
               variant="outline"
               size="sm"
-              onClick={() => openPrintablePaymentSlipWindow({ id: candidate.id, email: candidate.email, type: "rate2", customRate: nbsRate })}
+              onClick={() => openPaymentSlip?.("2")}
             >
-              Preuzmi uplatnicu
+              Uplatnica
             </Button>
             {!isSecondInstallmentPending && (
               <Button variant={isNext ? "primary" : "dark"} size="sm" onClick={handleReportSecondInstallment}>

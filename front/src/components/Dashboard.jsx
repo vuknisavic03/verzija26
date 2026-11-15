@@ -14,6 +14,7 @@ import {
   calculateProfileScore,
   reportInstallmentPayment,
   fetchPortalInvoices,
+  selectJobOnServer,
   formatUsd,
 } from "../data/candidateStore";
 
@@ -299,72 +300,16 @@ export default function Dashboard({
     Boolean(candidate.interviewDetails)
   );
 
-  const handleSelectJob = (job) => {
-    const employerStr = `${job.employer || ""} — ${job.title || ""}`.trim();
-    const stayStr = `${job.housing ? `${job.housing}, ` : ""}${job.city || ""}, SAD`.trim();
-    const currentDs160 = candidate.ds160 || {};
-    const updatedDs160 = {
-      ...currentDs160,
-      employerInfo: employerStr || currentDs160.employerInfo || "",
-      stayAddress: stayStr || currentDs160.stayAddress || "",
-      supervisorName: job.supervisor || currentDs160.supervisorName || "HR Department / Supervisor",
-      employerPhone: job.phone || currentDs160.employerPhone || "+1 (555) 234-5678",
-      tripFunder: currentDs160.tripFunder || "Lična sredstva / Work & Travel",
-      previousUsTravel: currentDs160.previousUsTravel || "Ne",
-      visaRefusal: currentDs160.visaRefusal || "Ne",
-    };
-
-    updateCandidateState({
-      selectedJobId: job.id,
-      selectedJob: job,
-      selectedJobTitle: job.title,
-      selectedJobEmployer: job.employer,
-      selectedJobCity: job.city,
-      selectedJobWage: job.wage,
-      selectedJobHousing: job.housing,
-      jobApplicationStatus: "APPLIED",
-      hasJob: false,
-      interviewScheduledAt: "",
-      interviewLink: "",
-      interviewNote: "",
-      ds160: updatedDs160,
-    });
-    setUploadToast(`Prijavili ste se za poziciju: ${job.title} (${job.employer})! Podaci o poslodavcu su automatski uneti u vaš DS-160 upitnik.`);
+  const handleSelectJob = async (job) => {
+    const result = await selectJobOnServer(job.id);
+    if (!result.ok) {
+      setUploadToast(result.error);
+      setTimeout(() => setUploadToast(""), 4500);
+      return;
+    }
+    setCandidate(result.candidate);
+    setUploadToast(`Prijavio/la si se za poziciju ${job.title} (${job.employer}). Termin intervjua ti javljamo ovde.`);
     setTimeout(() => setUploadToast(""), 4500);
-  };
-
-  const handleScheduleInterview = (details) => {
-    updateCandidateState({
-      interviewScheduled: true,
-      interviewDetails: details,
-      status: "job",
-    });
-    setUploadToast("Uspešno zakazan intervju sa američkim poslodavcem!");
-    setTimeout(() => setUploadToast(""), 4500);
-  };
-
-  const handleAcceptJobOffer = (signedOffer) => {
-    const currentDs160 = candidate.ds160 || {};
-    const updatedDs160 = {
-      ...currentDs160,
-      employerInfo: `${signedOffer.companyName || candidate.selectedJobEmployer || ""} — ${signedOffer.position || candidate.selectedJobTitle || ""}`.trim(),
-      stayAddress: signedOffer.housingAddress || `${candidate.selectedJobHousing ? `${candidate.selectedJobHousing}, ` : ""}${candidate.selectedJobCity || ""}, SAD`.trim(),
-      supervisorName: signedOffer.supervisor || currentDs160.supervisorName || "General Manager",
-      employerPhone: signedOffer.phone || currentDs160.employerPhone || "+1 (555) 234-5678",
-    };
-
-    updateCandidateState({
-      hasJob: true,
-      jobOfferAccepted: true,
-      jobOfferSignedAt: signedOffer.signedAt,
-      jobOfferSignature: signedOffer.signature,
-      jobOfferDetails: signedOffer,
-      status: "departure",
-      secondInstallmentDue: true,
-      ds160: updatedDs160,
-    });
-    setUploadToast("Job Offer je prihvaćen! Detalji poslodavca su automatski sinhronizovani sa DS-160 upitnikom.");
-    setTimeout(() => setUploadToast(""), 5000);
   };
 
   // Ažuriranje i perzistencija
@@ -710,6 +655,10 @@ export default function Dashboard({
     t,
     slipRequest,
     clearSlipRequest: () => setSlipRequest(null),
+    openPaymentSlip: (installment) => {
+      setSlipRequest(installment);
+      changeView("uplate");
+    },
     goTo,
     flash,
     // Registracija
@@ -1130,14 +1079,8 @@ export default function Dashboard({
           onClose={() => setShowJobFairModal(false)}
           candidate={candidate}
           onSelectJob={(job) => {
+            setShowJobFairModal(false);
             handleSelectJob(job);
-            setShowJobFairModal(false);
-            setUploadToast(`Izabrali ste poziciju: ${job.title} (${job.employer})!`);
-            setTimeout(() => setUploadToast(""), 4500);
-          }}
-          onScheduleInterview={(details) => {
-            handleScheduleInterview(details);
-            setShowJobFairModal(false);
           }}
         />
       )}
@@ -1148,9 +1091,10 @@ export default function Dashboard({
           isOpen={showJobOfferModal}
           onClose={() => setShowJobOfferModal(false)}
           candidate={candidate}
-          onAcceptOffer={(signedOffer) => {
-            handleAcceptJobOffer(signedOffer);
-            setShowJobOfferModal(false);
+          onSigned={(signed) => {
+            setCandidate((prev) => ({ ...(prev || {}), ...signed }));
+            setUploadToast("Job Offer je potpisan. Podaci poslodavca su upisani u tvoj DS-160.");
+            setTimeout(() => setUploadToast(""), 5000);
           }}
         />
       )}

@@ -6,20 +6,30 @@ import { PageHeader, Card, PlusIcon, SearchIcon, EditIcon, TrashIcon, Modal, Fie
 import { getJobs, saveJob, deleteJob } from "../../data/jobsStore";
 import { getCandidates } from "../../data/candidateStore";
 
+// Polja prikaza u katalogu + podaci za Job Offer. Sve je prazno dok agencija ne unese stvarne
+// podatke — Job Offer i DS-160 se popunjavaju samo onim što je ovde upisano.
+const OFFER_FIELDS = [
+  "legalName", "ein", "companyAddress", "supervisor", "supervisorPhone", "supervisorEmail",
+  "overtimeWage", "payFrequency", "startDate", "endDate",
+  "housingAddress", "housingCost", "housingDeposit", "mealPlan", "transportation", "uniform",
+];
 const EMPTY_JOB_FORM = {
   id: "",
   title: "",
   employer: "",
   category: "Ugostiteljstvo / Restoran",
   city: "",
-  wage: "$16.00 / sat",
-  hoursPerWeek: "35-40 h",
-  housing: "Obezbeđen smeštaj ($120/ned)",
-  period: "jun - septembar",
+  wage: "",
+  hoursPerWeek: "",
+  housing: "",
+  period: "",
   englishLevel: "B2",
   summary: "",
   description: "",
+  ...Object.fromEntries(OFFER_FIELDS.map((k) => [k, ""])),
 };
+const OFFER_REQUIRED = ["legalName", "companyAddress", "supervisor", "supervisorPhone", "wage", "hoursPerWeek", "startDate", "endDate", "housingAddress", "housingCost"];
+const offerComplete = (job) => OFFER_REQUIRED.every((k) => String(job[k] || "").trim());
 
 const CATEGORIES = [
   "Bazen / Spasilačka služba",
@@ -78,46 +88,44 @@ export default function JobsSection() {
 
   const handleOpenEditModal = (job) => {
     setEditingJob(job);
-    setForm({
-      id: job.id,
-      title: job.title || "",
-      employer: job.employer || "",
-      category: job.category || "Ugostiteljstvo / Restoran",
-      city: job.city || "",
-      wage: job.wage || "",
-      hoursPerWeek: job.hoursPerWeek || "35-40 h",
-      housing: job.housing || "",
-      period: job.period || "jun - septembar",
-      englishLevel: job.englishLevel || "B2",
-      summary: job.summary || "",
-      description: job.description || "",
-    });
+    setForm({ ...EMPTY_JOB_FORM, ...Object.fromEntries(Object.entries(job).filter(([, v]) => typeof v === "string")) });
     setModalOpen(true);
   };
 
-  const handleDelete = (id, title) => {
-    if (window.confirm(`Obrisati posao „${title}“?`)) {
-      deleteJob(id);
+  const [saving, setSaving] = useState(false);
+
+  const handleDelete = async (id, title) => {
+    if (!window.confirm(`Obrisati posao „${title}“?`)) return;
+    try {
+      await deleteJob(id);
       refreshJobs();
       showToast(`Posao „${title}“ je obrisan.`);
+    } catch (error) {
+      showToast(error.message);
     }
   };
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e?.preventDefault?.();
     if (!form.title.trim() || !form.employer.trim() || !form.city.trim()) {
       showToast("Upiši poziciju, poslodavca i grad.");
       return;
     }
-
-    const saved = saveJob(form);
-    refreshJobs();
-    setModalOpen(false);
-    showToast(
-      editingJob
-        ? `Sačuvano: ${saved.title}.`
-        : `Dodat posao: ${saved.title}.`
-    );
+    setSaving(true);
+    try {
+      const saved = await saveJob({ ...form, id: editingJob?.id || undefined });
+      refreshJobs();
+      setModalOpen(false);
+      showToast(
+        offerComplete(saved)
+          ? `Sačuvano: ${saved.title}.`
+          : `Sačuvano: ${saved.title}. Job Offer još nije kompletan — dopuni podatke ponude.`
+      );
+    } catch (error) {
+      showToast(error.message);
+    } finally {
+      setSaving(false);
+    }
   };
 
   const upd = (key) => (e) => setForm((prev) => ({ ...prev, [key]: e.target.value }));
@@ -203,6 +211,7 @@ export default function JobsSection() {
                       <p className="truncate text-[15px] font-medium text-ink">{job.title}</p>
                       <p className="truncate text-[13px] text-ink-3">
                         {job.employer} · {job.category}
+                        {!offerComplete(job) && <span className="text-amber-700"> · Job Offer nepotpun</span>}
                       </p>
                     </div>
                     <span className="shrink-0 text-sm font-semibold tabular-nums text-ink lg:hidden">{job.wage}</span>
@@ -249,7 +258,7 @@ export default function JobsSection() {
               <span />
               <div className="flex items-center gap-2">
                 <SecondaryButton onClick={() => setModalOpen(false)}>Otkaži</SecondaryButton>
-                <PrimaryButton onClick={handleSubmit}>{editingJob ? "Sačuvaj" : "Dodaj posao"}</PrimaryButton>
+                <PrimaryButton onClick={handleSubmit}>{saving ? "Čuvam…" : editingJob ? "Sačuvaj" : "Dodaj posao"}</PrimaryButton>
               </div>
             </>
           }
@@ -278,10 +287,10 @@ export default function JobsSection() {
 
             <div className="grid gap-4 sm:grid-cols-3">
               <Field label="Satnica">
-                <input value={form.wage} onChange={upd("wage")} className={FIELD_CLS} />
+                <input value={form.wage} onChange={upd("wage")} placeholder="$16.00 / hour" className={FIELD_CLS} />
               </Field>
               <Field label="Sati nedeljno">
-                <input value={form.hoursPerWeek} onChange={upd("hoursPerWeek")} className={FIELD_CLS} />
+                <input value={form.hoursPerWeek} onChange={upd("hoursPerWeek")} placeholder="35–40" className={FIELD_CLS} />
               </Field>
               <Field label="Engleski">
                 <select value={form.englishLevel} onChange={upd("englishLevel")} className={FIELD_CLS}>
@@ -291,10 +300,10 @@ export default function JobsSection() {
                 </select>
               </Field>
               <Field label="Smeštaj">
-                <input value={form.housing} onChange={upd("housing")} className={FIELD_CLS} />
+                <input value={form.housing} onChange={upd("housing")} placeholder="Obezbeđen, $130 nedeljno" className={FIELD_CLS} />
               </Field>
               <Field label="Period">
-                <input value={form.period} onChange={upd("period")} className={FIELD_CLS} />
+                <input value={form.period} onChange={upd("period")} placeholder="jun – septembar" className={FIELD_CLS} />
               </Field>
             </div>
 
@@ -304,6 +313,46 @@ export default function JobsSection() {
             <Field label="Detaljan opis">
               <textarea rows={5} value={form.description} onChange={upd("description")} className={FIELD_CLS} />
             </Field>
+
+            <section className="space-y-4 border-t border-line pt-6">
+              <div>
+                <h3 className="text-[15px] font-semibold text-ink">Podaci za Job Offer</h3>
+                <p className="mt-0.5 text-[13px] leading-relaxed text-ink-3">
+                  Kandidat potpisuje ponudu tačno sa ovim podacima, a isti idu u njegov DS-160. Bez polja označenih zvezdicom
+                  ponuda ne može da se potpiše.
+                </p>
+              </div>
+              <div className="grid gap-4 sm:grid-cols-2">
+                {[
+                  ["legalName", "Pravni naziv poslodavca *", "Ocean Breeze Resort LLC"],
+                  ["ein", "EIN", "12-3456789"],
+                  ["companyAddress", "Adresa poslodavca *", "100 Main St, Ocean City, MD 21842"],
+                  ["supervisor", "Nadređeni (ime, funkcija) *", "Jane Doe, HR Manager"],
+                  ["supervisorPhone", "Telefon nadređenog *", "+1 410 555 0101"],
+                  ["supervisorEmail", "Email nadređenog", "hr@primer.com"],
+                  ["startDate", "Početak rada *", "2027-06-01"],
+                  ["endDate", "Kraj rada *", "2027-09-15"],
+                  ["overtimeWage", "Prekovremeni rad", "$24.00 / hour posle 40 h"],
+                  ["payFrequency", "Isplata", "Svake dve nedelje"],
+                  ["housingAddress", "Adresa smeštaja *", "12 Bay Rd, Ocean City, MD"],
+                  ["housingCost", "Cena smeštaja *", "$130 / week"],
+                  ["housingDeposit", "Depozit za smeštaj", "$150, povratan"],
+                  ["mealPlan", "Ishrana", "Jedan obrok po smeni"],
+                  ["transportation", "Prevoz do posla", "Pešice 10 minuta"],
+                  ["uniform", "Uniforma", "Obezbeđuje poslodavac"],
+                ].map(([key, label, ph]) => (
+                  <Field key={key} label={label}>
+                    <input
+                      type={key === "startDate" || key === "endDate" ? "date" : "text"}
+                      value={form[key]}
+                      onChange={upd(key)}
+                      placeholder={ph}
+                      className={FIELD_CLS}
+                    />
+                  </Field>
+                ))}
+              </div>
+            </section>
           </form>
         </Modal>
       )}

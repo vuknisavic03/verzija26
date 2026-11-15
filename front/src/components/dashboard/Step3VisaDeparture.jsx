@@ -1,7 +1,7 @@
 // front/src/components/dashboard/Step3VisaDeparture.jsx
 // Korak 3: DS-2019 → DS-160 → vizna taksa → Ambasada → III rata / PKZ → orijentacija i let.
 import { Button } from "../ui";
-import { downloadPaymentSlipPdf, getDs160Status } from "../../data/candidateStore";
+import { getDs160Status } from "../../data/candidateStore";
 import { StepShell, TaskList, Actions, LinkButton, Notice, StatusPill } from "./ui";
 
 export function isPkz(candidate) {
@@ -28,6 +28,7 @@ export function buildVisaTasks(ctx) {
     isThirdInstallmentPending,
     handleReportThirdInstallment,
     setShowDs160Modal,
+    openPaymentSlip,
     stepLocked,
   } = ctx;
   const isFullPaid = candidate.paymentMethod === "now" || candidate.isFullPaymentPaid;
@@ -125,7 +126,7 @@ export function buildVisaTasks(ctx) {
           render: (isNext) =>
             isThirdInstallmentPaid ? null : (
               <Actions>
-                <Button variant="outline" size="sm" onClick={() => downloadPaymentSlipPdf(candidate.id, candidate.email)}>
+                <Button variant="outline" size="sm" onClick={() => openPaymentSlip?.("3")}>
                   Preuzmi uplatnicu
                 </Button>
                 {!isThirdInstallmentPending && (

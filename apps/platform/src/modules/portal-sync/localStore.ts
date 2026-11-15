@@ -6,6 +6,7 @@ import { getPayload, type Payload } from 'payload'
 
 import { generateInvitationCode } from './invitationCode.ts'
 import { deletePortalRecord, readPortalDb, writePortalDb } from './portalDb.ts'
+import type { PortalJob } from './portalJobs.ts'
 
 export interface PortalGuarantor {
   name: string
@@ -204,6 +205,7 @@ export interface PortalStoreData {
   siteContent?: Record<string, { title: string; content: string }>
   faqItems?: PortalFaqItem[]
   promotions?: PortalPromotion[]
+  jobs?: PortalJob[]
 }
 
 // Stari demo fajl. Čita se samo jednom, za uvoz u bazu; u njega se više ne piše.
@@ -257,6 +259,7 @@ async function readStore(): Promise<PortalStoreData> {
     candidates: snapshot.candidates as unknown as PortalCandidate[],
     faqItems: (settings.faqItems || []) as PortalFaqItem[],
     invitations: (settings.invitations || []) as PortalInvitation[],
+    jobs: (settings.jobs || []) as PortalJob[],
     promotions: (settings.promotions || []) as PortalPromotion[],
     siteContent: (settings.siteContent || {}) as PortalStoreData['siteContent'],
   }
@@ -276,6 +279,7 @@ async function writeStore(data: PortalStoreData, options: { legacyImportedAt?: s
         announcements: data.announcements || [],
         faqItems: data.faqItems || [],
         invitations: data.invitations || [],
+        jobs: data.jobs || [],
         promotions: data.promotions || [],
         siteContent: data.siteContent || {},
       },
@@ -1109,6 +1113,25 @@ export async function savePortalFaq(items: PortalFaqItem[]) {
   fileData.faqItems = items
   await writeStore(fileData)
   return fileData.faqItems
+}
+
+/** Katalog poslova (agencija). Upis jednog posla ili brisanje; ostali ostaju netaknuti. */
+export async function savePortalJob(job: PortalJob) {
+  const fileData = await readStore()
+  const jobs = fileData.jobs || []
+  const idx = jobs.findIndex((j) => j.id === job.id)
+  if (idx >= 0) jobs[idx] = job
+  else jobs.push(job)
+  fileData.jobs = jobs
+  await writeStore(fileData)
+  return jobs
+}
+
+export async function deletePortalJob(id: string) {
+  const fileData = await readStore()
+  fileData.jobs = (fileData.jobs || []).filter((j) => j.id !== id)
+  await writeStore(fileData)
+  return fileData.jobs
 }
 
 export async function savePortalPromotions(promotions: PortalPromotion[]) {

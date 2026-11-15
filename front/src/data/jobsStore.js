@@ -1,102 +1,77 @@
 // front/src/data/jobsStore.js
-// Perzistentno skladište za Bazu poslova u SAD (CRUD operacije i dodela kandidatima)
+// Katalog poslova. Vodi ga agencija na serveru; pregledač drži samo keš poslednjeg učitavanja
+// (kandidat dobija samo poslove koji su mu ponuđeni). Demo lista se prikazuje samo u demo režimu.
 
+import { DEMO_MODE } from "../config";
 import defaultJobItems from "./jobItems";
 
-const JOBS_STORAGE_KEY = "aa_us_jobs_catalog";
+const JOBS_CACHE_KEY = "aa_jobs_cache_v2";
 
-function loadStoredJobs() {
-  if (typeof window === "undefined") return defaultJobItems;
+function readCache() {
   try {
-    const raw = localStorage.getItem(JOBS_STORAGE_KEY);
-    if (!raw) {
-      localStorage.setItem(JOBS_STORAGE_KEY, JSON.stringify(defaultJobItems));
-      return defaultJobItems;
-    }
-    const parsed = JSON.parse(raw);
-    if (Array.isArray(parsed) && parsed.length > 0) {
-      return parsed;
-    }
-    return defaultJobItems;
-  } catch (err) {
-    console.warn("Greška pri učitavanju poslova iz localStorage:", err);
-    return defaultJobItems;
+    const raw = localStorage.getItem(JOBS_CACHE_KEY);
+    const parsed = raw ? JSON.parse(raw) : null;
+    if (Array.isArray(parsed)) return parsed;
+  } catch {
+    /* keš nije dostupan */
   }
+  return DEMO_MODE ? defaultJobItems : [];
 }
 
-function persistJobs(jobs) {
-  if (typeof window === "undefined") return;
+/** Upisuje listu poslova koju je vratio server (poziva ga sinhronizacija portala). */
+export function setJobsCache(jobs) {
+  if (!Array.isArray(jobs)) return;
   try {
-    localStorage.setItem(JOBS_STORAGE_KEY, JSON.stringify(jobs));
-    window.dispatchEvent(new Event("aa_jobs_updated"));
-  } catch (err) {
-    console.warn("Greška pri čuvanju poslova u localStorage:", err);
+    localStorage.setItem(JOBS_CACHE_KEY, JSON.stringify(jobs));
+  } catch {
+    /* keš nije dostupan */
   }
+  window.dispatchEvent(new Event("aa_jobs_updated"));
 }
 
 export function getJobs() {
-  return loadStoredJobs();
+  return readCache();
 }
 
 export function getJobById(id) {
-  const jobs = loadStoredJobs();
-  return jobs.find((j) => String(j.id) === String(id)) || null;
+  return readCache().find((j) => String(j.id) === String(id)) || null;
 }
 
-export function saveJob(jobData) {
-  const jobs = loadStoredJobs();
-  const now = new Date().toISOString();
-
-  if (jobData.id) {
-    const idx = jobs.findIndex((j) => String(j.id) === String(jobData.id));
-    if (idx >= 0) {
-      const updated = {
-        ...jobs[idx],
-        ...jobData,
-        updatedAt: now,
-      };
-      jobs[idx] = updated;
-      persistJobs(jobs);
-      return updated;
-    }
-  }
-
-  const newId = jobData.id || `job-${Date.now()}`;
-  const newJob = {
-    ...jobData,
-    id: newId,
-    createdAt: now,
-    updatedAt: now,
-  };
-  jobs.unshift(newJob);
-  persistJobs(jobs);
-  return newJob;
+async function postAction(action, payload) {
+  const res = await fetch("/api/public/portal-state", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    credentials: "include",
+    body: JSON.stringify({ action, payload }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.message || "Čuvanje nije uspelo.");
+  return data;
 }
 
-export function deleteJob(id) {
-  const jobs = loadStoredJobs();
-  const filtered = jobs.filter((j) => String(j.id) !== String(id));
-  persistJobs(filtered);
-  return filtered;
+/** Agencija: dodaj ili izmeni posao. Vraća sačuvan posao (ID dodeljuje server). */
+export async function saveJob(jobData) {
+  const data = await postAction("saveJob", jobData);
+  setJobsCache(data.jobs);
+  return data.job;
 }
 
-export function resetJobsToDefault() {
-  persistJobs(defaultJobItems);
-  return defaultJobItems;
+/** Agencija: obriši posao. */
+export async function deleteJob(id) {
+  const data = await postAction("deleteJob", { id });
+  setJobsCache(data.jobs);
+  return data.jobs;
 }
 
 /**
- * Vraća listu poslova koji su ponuđeni određenom kandidatu.
- * Ako je candidate.offerAllJobs === false i postoji candidate.offeredJobIds, vraća samo te poslove.
- * U suprotnom podrazumevano vraća sve poslove.
+ * Poslovi ponuđeni kandidatu. Kandidatov keš već sadrži samo njegove ponude; agencija (koja vidi
+ * ceo katalog) ovde dobija suženi izbor ako je postavljen.
  */
 export function getOfferedJobsForCandidate(candidate) {
   const allJobs = getJobs();
   if (!candidate) return allJobs;
-
   if (candidate.offerAllJobs === false && Array.isArray(candidate.offeredJobIds)) {
     return allJobs.filter((j) => candidate.offeredJobIds.includes(j.id));
   }
-
   return allJobs;
 }

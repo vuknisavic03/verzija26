@@ -29,6 +29,7 @@ export interface PortalSettingsData {
   announcements: unknown[]
   faqItems: unknown[]
   invitations: unknown[]
+  jobs?: unknown[]
   legacyImportedAt?: string
   promotions: unknown[]
   siteContent: Record<string, unknown>

@@ -1,6 +1,10 @@
-import { useState } from "react";
+// front/src/components/JobOfferModal.jsx
+// Job Offer: podaci isključivo iz kataloga agencije (server). Ako nešto nedostaje, ponuda se ne
+// može potpisati; isti podaci idu u DS-160.
+import { useEffect, useState } from "react";
+import Sheet, { SheetFooter, FormField, Hint, fieldInputCls as inp } from "./dashboard/Sheet";
 import { Button } from "./ui";
-import Sheet, { SheetSection, SheetFooter, FormField, fieldInputCls as inp } from "./dashboard/Sheet";
+import { acceptJobOffer, fetchJobOffer } from "../data/candidateStore";
 
 export default function JobOfferModal(props) {
   if (!props.isOpen) return null;
@@ -9,213 +13,197 @@ export default function JobOfferModal(props) {
 
 function Rows({ items }) {
   return (
-    <dl className="divide-y divide-line rounded-xl border border-line">
+    <dl className="divide-y divide-line">
       {items.map(([k, v]) => (
-        <div key={k} className="flex flex-col gap-0.5 px-4 py-2.5 sm:flex-row sm:items-baseline sm:justify-between sm:gap-6">
-          <dt className="shrink-0 text-[13px] text-ink-3">{k}</dt>
-          <dd className="text-sm text-ink sm:text-right">{v}</dd>
+        <div key={k} className="flex items-baseline justify-between gap-4 py-2.5">
+          <dt className="text-[13px] text-ink-3">{k}</dt>
+          <dd className="text-right text-sm font-medium text-ink">{v || "—"}</dd>
         </div>
       ))}
     </dl>
   );
 }
 
-function JobOffer({ onClose, candidate, jobOfferDetails, onAccept, onAcceptOffer }) {
+function Section({ title, children }) {
+  return (
+    <section>
+      <h3 className="mb-1 text-[15px] font-semibold text-ink">{title}</h3>
+      {children}
+    </section>
+  );
+}
 
-  const defaultOffer = {
-    offerNumber: candidate?.selectedJobOfferNumber || "JO-2026-CA-0842",
-    companyName: candidate?.selectedJobEmployer || "Tahoe Pines Lodge & Resort LLC",
-    ein: candidate?.selectedJobEin || "88-4298103",
-    companyAddress: candidate?.selectedJobCity ? `${candidate.selectedJobCity}, USA` : "4082 Lake Tahoe Blvd, South Lake Tahoe, CA 96150",
-    supervisor: "Mark Stevens, General Manager",
-    phone: "+1 (530) 542-8800",
-    email: "hr@tahoepineslodge.com",
-    position: candidate?.selectedJobTitle || candidate?.preferences?.position || "Sobarica / Housekeeping Staff",
-    wage: candidate?.selectedJobWage || "$17.50 / hour",
-    overtimeWage: "$26.25 / hour (after 40 hours)",
-    hoursPerWeek: "35–40 hours per week",
-    payFrequency: "Bi-weekly (svake 2 nedelje direct deposit)",
-    startDate: "2026-06-05",
-    endDate: "2026-09-30",
-    housingAddress: "Pines Employee Village, 112 Pines Way, South Lake Tahoe",
-    housingCost: "$110.00 / week (odbitak od zarade)",
-    housingDeposit: "$150.00 (povratan depozit)",
-    mealPlan: "1 besplatan topli obrok po smeni u restoranu hotela",
-    transportation: "Besplatan autobuski prevoz za zaposlene do radnog mesta (10 min)",
-    uniformRequired: "Obezbeđuje poslodavac (2 majice i pregača)",
-    signedAt: candidate?.jobOfferSignedAt || null,
-    signature: candidate?.jobOfferSignature || "",
+function formatDate(iso) {
+  if (!iso) return "";
+  try {
+    return new Date(iso).toLocaleDateString("sr-Latn-RS", { day: "numeric", month: "long", year: "numeric" });
+  } catch {
+    return iso;
+  }
+}
+
+function JobOffer({ onClose, candidate, onSigned }) {
+  const [data, setData] = useState(null);
+  const [error, setError] = useState("");
+  const [signature, setSignature] = useState(
+    `${candidate?.firstName || ""} ${candidate?.lastName || ""}`.trim() || candidate?.name || ""
+  );
+  const [agreed, setAgreed] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  const load = async () => {
+    const result = await fetchJobOffer();
+    if (result.ok) {
+      setData(result);
+      setError("");
+    } else setError(result.error);
   };
 
-  const offer = { ...defaultOffer, ...(jobOfferDetails || {}) };
-  const isAlreadySigned = Boolean(candidate?.hasJob || offer.signedAt);
+  useEffect(() => {
+    load();
+  }, []);
 
-  const [signatureText, setSignatureText] = useState(
-    isAlreadySigned ? offer.signature || candidate?.name || "" : candidate?.name || ""
-  );
-  const [agreedTerms, setAgreedTerms] = useState(isAlreadySigned);
-  const [isSubmitting, setIsSubmitting] = useState(false);
+  const offer = data?.offer;
+  const acceptance = data?.acceptance;
+  const canSign =
+    data && !acceptance && data.applicationStatus === "ACCEPTED" && data.missing.length === 0 && agreed && signature.trim().length >= 3 && !busy;
 
-  const handleSign = (e) => {
-    e.preventDefault();
-    if (!agreedTerms || !signatureText.trim()) return;
-    setIsSubmitting(true);
-    setTimeout(() => {
-      const acceptFn = onAccept || onAcceptOffer || (() => {});
-      acceptFn({
-        ...offer,
-        signedAt: new Date().toISOString(),
-        signature: signatureText.trim(),
-      });
-      setIsSubmitting(false);
-      onClose();
-    }, 400);
+  const handleSign = async (e) => {
+    e?.preventDefault?.();
+    if (!canSign) return;
+    setBusy(true);
+    const result = await acceptJobOffer(data.fingerprint, signature.trim());
+    setBusy(false);
+    if (!result.ok) {
+      setError(result.error);
+      if (result.status === 409) await load();
+      return;
+    }
+    if (result.candidate) onSigned?.(result.candidate);
+    await load();
   };
 
   return (
     <Sheet
-      onClose={onClose}
-      size="lg"
       as="form"
       onSubmit={handleSign}
-      title="Job Offer"
-      subtitle={`${offer.offerNumber} · ${offer.companyName}`}
-      aside={
-        <span className={isAlreadySigned ? "text-[13px] text-emerald-700" : "text-[13px] text-ink-3"}>
-          {isAlreadySigned ? "Potpisan" : "Čeka potpis"}
-        </span>
-      }
+      onClose={onClose}
+      size="lg"
+      title={acceptance ? "Job Offer je potpisan" : "Job Offer"}
+      subtitle={offer ? `${offer.offerNumber} · ${offer.companyName || candidate?.selectedJobEmployer || ""}` : undefined}
       footer={
-        <SheetFooter
-          left={
-            <Button variant="ghost" onClick={() => window.print()} className="max-sm:hidden">
-              Štampaj
-            </Button>
-          }
-        >
-          {isAlreadySigned ? (
-            <Button variant="outline" onClick={onClose}>
+        <SheetFooter>
+          {acceptance ? (
+            <Button variant="primary" onClick={onClose}>
               Zatvori
             </Button>
           ) : (
-            <Button type="submit" variant="primary" disabled={isSubmitting || !agreedTerms || !signatureText.trim()}>
-              {isSubmitting ? "Potpisujem…" : "Potpiši i prihvati"}
+            <Button type="submit" variant="primary" disabled={!canSign}>
+              {busy ? "Potpisujem…" : "Potpiši Job Offer"}
             </Button>
           )}
         </SheetFooter>
       }
     >
-      <div className="space-y-8">
-        {/* Ukratko */}
-        <div className="rounded-2xl bg-ink px-5 py-5 text-white">
-          <p className="text-[13px] text-white/60">{offer.companyName}</p>
-          <p className="mt-1 text-xl font-semibold leading-snug">{offer.position}</p>
-          <div className="mt-4 grid grid-cols-3 gap-3 border-t border-white/15 pt-4 text-sm">
-            <div>
-              <p className="text-xs text-white/55">Satnica</p>
-              <p className="mt-0.5 font-semibold tabular-nums">{offer.wage}</p>
-            </div>
-            <div>
-              <p className="text-xs text-white/55">Sati</p>
-              <p className="mt-0.5 font-semibold">{offer.hoursPerWeek}</p>
-            </div>
-            <div>
-              <p className="text-xs text-white/55">Smeštaj</p>
-              <p className="mt-0.5 font-semibold tabular-nums">{offer.housingCost}</p>
-            </div>
-          </div>
-        </div>
+      {!data && !error && <div className="h-48 animate-pulse rounded-xl bg-surface" aria-label="Učitavam ponudu" />}
+      {error && (
+        <p role="alert" className="mb-4 text-[13px] text-red-700">
+          {error}
+        </p>
+      )}
 
-        <SheetSection title="Posao">
-          <Rows
-            items={[
-              ["Pozicija", offer.position],
-              ["Satnica", offer.wage],
-              ["Prekovremeno", offer.overtimeWage],
-              ["Nedeljno", offer.hoursPerWeek],
-              ["Period", `${offer.startDate} – ${offer.endDate}`],
-              ["Isplata", offer.payFrequency],
-            ]}
-          />
-        </SheetSection>
-
-        <SheetSection title="Smeštaj i pogodnosti">
-          <Rows
-            items={[
-              ["Adresa", offer.housingAddress],
-              ["Cena", offer.housingCost],
-              ["Depozit", offer.housingDeposit],
-              ["Hrana", offer.mealPlan],
-              ["Prevoz", offer.transportation],
-              ["Uniforma", offer.uniformRequired],
-            ]}
-          />
-        </SheetSection>
-
-        <SheetSection title="Poslodavac">
-          <Rows
-            items={[
-              ["Firma", offer.companyName],
-              ["Adresa", offer.companyAddress],
-              ["EIN", offer.ein],
-              ["Kontakt", `${offer.supervisor}, ${offer.phone}`],
-              ["E-mail", offer.email],
-            ]}
-          />
-        </SheetSection>
-
-        <SheetSection title="Ti">
-          <Rows
-            items={[
-              ["Ime", candidate?.name || `${candidate?.firstName || ""} ${candidate?.lastName || ""}`.trim() || "Kandidat"],
-              ["Fakultet", candidate?.faculty || "Univerzitet u Beogradu"],
-              ["Pasoš", candidate?.passportNumber || "014298751"],
-              ["Kontakt", [candidate?.email, candidate?.phone].filter(Boolean).join(" · ")],
-            ]}
-          />
-        </SheetSection>
-
-        <SheetSection title="Obaveze">
-          <p className="text-sm leading-relaxed text-ink-2">
-            Javljaš se poslodavcu na dan početka rada, savesno radiš i poštuješ pravila kompanije i zakone SAD. Kad prihvatiš ponudu,
-            sledi uplata II rate i izrada DS-2019 kod sponzora.
-          </p>
-        </SheetSection>
-
-        <SheetSection title="Potpis">
-          {isAlreadySigned ? (
-            <div className="rounded-xl border border-line px-4 py-4">
-              <p className="font-serif text-xl italic text-ink">{offer.signature || candidate?.name}</p>
-              <p className="mt-1 text-[13px] text-ink-3">
-                {new Date(offer.signedAt || Date.now()).toLocaleDateString("sr-RS")} · ID SHA256-JO-{String(candidate?.id || "928174").slice(-6)}
-              </p>
-            </div>
-          ) : (
-            <div className="space-y-4">
-              <FormField label="Ime i prezime kao potpis">
-                <input
-                  type="text"
-                  required
-                  value={signatureText}
-                  onChange={(e) => setSignatureText(e.target.value)}
-                  placeholder="Ime Prezime"
-                  className={inp + " font-serif text-lg italic"}
-                />
-              </FormField>
-              <label className="flex cursor-pointer items-start gap-3 text-sm text-ink-2">
-                <input
-                  type="checkbox"
-                  required
-                  checked={agreedTerms}
-                  onChange={(e) => setAgreedTerms(e.target.checked)}
-                  className="mt-0.5 h-5 w-5 shrink-0 accent-neutral-900"
-                />
-                <span>Pročitao sam uslove — posao, satnicu, smeštaj i obaveze — i prihvatam ih.</span>
-              </label>
-            </div>
+      {data && (
+        <div className="space-y-6">
+          {data.applicationStatus !== "ACCEPTED" && !acceptance && (
+            <Hint>Job Offer potpisuješ kad te poslodavac izabere posle intervjua. Javićemo ti ovde i na email.</Hint>
           )}
-        </SheetSection>
-      </div>
+          {data.applicationStatus === "ACCEPTED" && !acceptance && data.missing.length > 0 && (
+            <Hint>
+              Agencija još unosi podatke ponude ({data.missing.join(", ")}). Ponudu potpisuješ kad bude kompletna.
+            </Hint>
+          )}
+
+          {offer && (
+            <>
+              <div className="rounded-2xl bg-ink px-5 py-5 text-white">
+                <p className="text-[13px] text-white/60">{offer.companyName || "Poslodavac"}</p>
+                <p className="mt-1 text-xl font-semibold leading-snug">{offer.position}</p>
+                <div className="mt-4 grid grid-cols-3 gap-3 text-sm">
+                  <div>
+                    <p className="text-xs text-white/60">Satnica</p>
+                    <p className="mt-0.5 font-semibold tabular-nums">{offer.wage || "—"}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-white/60">Nedeljno</p>
+                    <p className="mt-0.5 font-semibold">{offer.hoursPerWeek || "—"}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-white/60">Smeštaj</p>
+                    <p className="mt-0.5 font-semibold tabular-nums">{offer.housingCost || "—"}</p>
+                  </div>
+                </div>
+              </div>
+
+              <Section title="Posao">
+                <Rows
+                  items={[
+                    ["Pozicija", offer.position],
+                    ["Satnica", offer.wage],
+                    ["Prekovremeno", offer.overtimeWage],
+                    ["Nedeljno", offer.hoursPerWeek],
+                    ["Period", offer.startDate && offer.endDate ? `${formatDate(offer.startDate)} – ${formatDate(offer.endDate)}` : ""],
+                    ["Isplata", offer.payFrequency],
+                  ]}
+                />
+              </Section>
+              <Section title="Smeštaj i uslovi">
+                <Rows
+                  items={[
+                    ["Adresa", offer.housingAddress],
+                    ["Cena", offer.housingCost],
+                    ["Depozit", offer.housingDeposit],
+                    ["Hrana", offer.mealPlan],
+                    ["Prevoz", offer.transportation],
+                    ["Uniforma", offer.uniformRequired],
+                  ]}
+                />
+              </Section>
+              <Section title="Poslodavac">
+                <Rows
+                  items={[
+                    ["Firma", offer.companyName],
+                    ["EIN", offer.ein],
+                    ["Adresa", offer.companyAddress],
+                    ["Nadređeni", offer.supervisor],
+                    ["Telefon", offer.phone],
+                    ["Email", offer.email],
+                  ]}
+                />
+              </Section>
+            </>
+          )}
+
+          {acceptance ? (
+            <Hint>
+              Potpisao/la si {formatDate(acceptance.acceptedAt)} kao „{acceptance.signature}". Podaci poslodavca su upisani u tvoj
+              DS-160.
+            </Hint>
+          ) : (
+            data.applicationStatus === "ACCEPTED" &&
+            data.missing.length === 0 && (
+              <section className="space-y-4 border-t border-line pt-6">
+                <FormField label="Potpis — ime i prezime">
+                  <input value={signature} onChange={(e) => setSignature(e.target.value)} autoComplete="name" className={inp} />
+                </FormField>
+                <label className="flex cursor-pointer gap-3 rounded-xl border border-line-strong px-4 py-3.5 hover:border-ink/40">
+                  <input type="checkbox" checked={agreed} onChange={(e) => setAgreed(e.target.checked)} className="mt-0.5 h-5 w-5 shrink-0 accent-ink" />
+                  <span className="text-[13px] leading-relaxed text-ink-2">{data.statement}</span>
+                </label>
+              </section>
+            )
+          )}
+        </div>
+      )}
     </Sheet>
   );
 }

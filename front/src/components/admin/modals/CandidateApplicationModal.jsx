@@ -163,6 +163,7 @@ export default function CandidateApplicationModal({ candidate, onSave, onClose }
   const [interviewPrepType, setInterviewPrepType] = useState(candidate.interviewPrepType || "ONLINE");
   const [interviewPrepNotes, setInterviewPrepNotes] = useState(candidate.interviewPrepNotes || "");
 
+  const [selectedJobId, setSelectedJobId] = useState(candidate.selectedJobId || "");
   const [selectedJobTitle, setSelectedJobTitle] = useState(candidate.selectedJobTitle || "");
   const [selectedJobEmployer, setSelectedJobEmployer] = useState(candidate.selectedJobEmployer || "");
   const [selectedJobCity, setSelectedJobCity] = useState(candidate.selectedJobCity || "");
@@ -340,6 +341,7 @@ export default function CandidateApplicationModal({ candidate, onSave, onClose }
       interviewType,
       interviewLink,
       interviewNote,
+      selectedJobId: selectedJobId || null,
       selectedJobTitle: selectedJobTitle.trim(),
       selectedJobEmployer: selectedJobEmployer.trim(),
       selectedJobCity: selectedJobCity.trim(),
@@ -419,6 +421,7 @@ export default function CandidateApplicationModal({ candidate, onSave, onClose }
       interviewPrepScheduledAt: interviewPrepScheduledAt || null,
       interviewPrepType,
       interviewPrepNotes: interviewPrepNotes.trim(),
+      selectedJobId: selectedJobId || null,
       selectedJobTitle: selectedJobTitle.trim(),
       selectedJobEmployer: selectedJobEmployer.trim(),
       selectedJobCity: selectedJobCity.trim(),
@@ -1586,6 +1589,7 @@ export default function CandidateApplicationModal({ candidate, onSave, onClose }
                       onChange={(e) => {
                         const job = allCatalogJobs.find((j) => String(j.id) === String(e.target.value));
                         if (job) {
+                          setSelectedJobId(job.id);
                           setSelectedJobTitle(job.title);
                           setSelectedJobEmployer(job.employer);
                           setSelectedJobCity(job.city);
@@ -1604,6 +1608,23 @@ export default function CandidateApplicationModal({ candidate, onSave, onClose }
                       ))}
                     </select>
                   </Field>
+                  {(() => {
+                    const catalogJob = allCatalogJobs.find((j) => String(j.id) === String(selectedJobId));
+                    const required = ["legalName", "companyAddress", "supervisor", "supervisorPhone", "wage", "hoursPerWeek", "startDate", "endDate", "housingAddress", "housingCost"];
+                    if (!selectedJobEmployer) return null;
+                    if (!catalogJob)
+                      return (
+                        <p className="mt-2 text-[13px] text-amber-700">
+                          Job Offer se pravi iz baze poslova. Izaberi posao iz liste da bi kandidat mogao da potpiše ponudu.
+                        </p>
+                      );
+                    const missing = required.filter((k) => !String(catalogJob[k] || "").trim());
+                    return missing.length ? (
+                      <p className="mt-2 text-[13px] text-amber-700">
+                        Job Offer za ovaj posao nije kompletan. Dopuni podatke ponude u „Poslovi" pre nego što označiš da je kandidat izabran.
+                      </p>
+                    ) : null;
+                  })()}
                   <div className="mt-3.5 grid gap-3.5 sm:grid-cols-3">
                     <Field label="Poslodavac">
                       <input value={selectedJobEmployer} onChange={(e) => setSelectedJobEmployer(e.target.value)} className={FIELD_CLS} />
