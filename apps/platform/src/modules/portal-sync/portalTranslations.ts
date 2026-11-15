@@ -4,6 +4,7 @@ import { getPayload } from 'payload'
 
 import { getPortalState, savePortalCandidate } from './localStore.ts'
 import { readPortalDocument, storePortalDocument } from './portalDb.ts'
+import { notifyCandidate } from './portalNotifications.ts'
 import { translateWithAi, TranslationUnavailableError } from './portalTranslationAi.ts'
 import { renderTranslationPdf } from './portalTranslationPdf.ts'
 import {
@@ -209,6 +210,8 @@ export async function reviewTranslation(input: {
   if (input.action === 'reject') {
     const reason = (input.reason || '').trim()
     if (reason.length < 3) throw new PortalTranslationError('Napiši kandidatu šta treba da ispravi.', 400)
+    const label = input.doc === 'faculty' ? 'Uverenje o studiranju' : 'Uverenje o nekažnjavanju (MUP)'
+    notifyCandidate(candidate, { details: { document: label, reason: reason.slice(0, 1_000) }, kind: 'translationRejected' })
     return savePortalCandidate(
       withTranslation(candidate, input.doc, {
         ...translation,

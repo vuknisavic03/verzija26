@@ -5,9 +5,16 @@ import { HomePrograms, HomeSteps, HomePricing, HomeVoices, HomeFaq, HomeOffers, 
 import CtaBand from "./components/CtaBand";
 import Footer from "./components/Footer";
 import navItems from "./data/navItems";
-import { DEMO_ADMIN } from "./config";
 // Direktno iz session modula (ne iz zbirnog index-a) da početni paket ne povuče ceo store.
-import { getCurrentUser, clearCurrentUser, getCandidates, setCurrentUser, syncFromBackend } from "./data/candidateStore/session";
+import {
+  getCurrentUser,
+  clearCurrentUser,
+  syncFromBackend,
+  loginCandidate,
+  loginAdmin,
+  fetchSessionRole,
+  logoutSession,
+} from "./data/candidateStore/session";
 
 // Sve osim početne se učitava tek kad zatreba — posetilac ne preuzima admin panel i portal.
 const ProgramsPage = lazy(() => import("./components/ProgramsPage"));
@@ -19,6 +26,7 @@ const NewsArticle = lazy(() => import("./components/NewsArticle"));
 const Contact = lazy(() => import("./components/Contact"));
 const Login = lazy(() => import("./components/Login"));
 const ForgotPassword = lazy(() => import("./components/ForgotPassword"));
+const ResetPassword = lazy(() => import("./components/ResetPassword"));
 const Register = lazy(() => import("./components/Register"));
 const OnlinePrijava = lazy(() => import("./components/OnlinePrijava"));
 const Dashboard = lazy(() => import("./components/Dashboard"));
@@ -41,6 +49,7 @@ const TITLES = {
   "/kontakt": "Kontakt",
   "/prijava": "Prijava na nalog",
   "/zaboravljena-lozinka": "Zaboravljena lozinka",
+  "/nova-lozinka": "Nova lozinka",
   "/registracija": "Aktivacija naloga",
   "/prijava-online": "Online prijava",
   "/nalog": "Moj profil",
@@ -60,6 +69,7 @@ const newsSlugFor = (path) => /^\/(novosti|vesti)\/.+/.test(path);
 
 const currentHref = () => window.location.pathname + window.location.search + window.location.hash || "/";
 
+// Lokalni podsetnik samo za prvi prikaz (bez treptanja); pravu sesiju uvek potvrđuje server.
 function readAdminSession() {
   try {
     return localStorage.getItem(ADMIN_SESSION_KEY) === "true";
@@ -74,23 +84,6 @@ function writeAdminSession(on) {
     else localStorage.removeItem(ADMIN_SESSION_KEY);
   } catch {
     /* privatni režim — sesija važi do osvežavanja */
-  }
-}
-
-// Administrator je nalog u Payload kolekciji `users`. Uspešna prijava postavlja i kolačić sesije.
-async function loginAdminWithBackend(email, password) {
-  try {
-    const res = await fetch("/api/users/login", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      credentials: "include",
-      body: JSON.stringify({ email, password }),
-    });
-    if (!res.ok) return false;
-    const data = await res.json().catch(() => null);
-    return Boolean(data?.user);
-  } catch {
-    return false;
   }
 }
 
@@ -156,51 +149,64 @@ export default function App() {
   }, []);
 
   const handleLogin = async (creds = {}) => {
-    const id = (creds.identifier || "").trim().toLowerCase();
+    const email = (creds.identifier || "").trim().toLowerCase();
     const password = creds.password || "";
+    if (!email.includes("@")) {
+      return { success: false, error: "Prijavi se email adresom na koju je otvoren nalog." };
+    }
 
-    const enterAdmin = () => {
+    // 1) Kandidat
+    const candidate = await loginCandidate(email, password);
+    if (candidate.ok) {
+      writeAdminSession(false);
+      setIsAdmin(false);
+      setCurrentCandidate(candidate.candidate || getCurrentUser());
+      portalSynced.current = true;
+      navigateTo("/profil");
+      return { success: true };
+    }
+    if (candidate.status === 429 || candidate.status === 0) return { success: false, error: candidate.error };
+
+    // 2) Agencija
+    const admin = await loginAdmin(email, password);
+    if (admin.ok) {
       writeAdminSession(true);
       clearCurrentUser();
       setCurrentCandidate(null);
       setIsAdmin(true);
+      portalSynced.current = false;
       navigateTo("/admin");
       return { success: true };
-    };
-
-    // 1) Kandidat — nalog nastaje registracijom sa verifikacionim kodom.
-    if (!portalSynced.current) {
-      portalSynced.current = true;
-      await syncFromBackend();
     }
-    const found = getCandidates().find(
-      (c) => c.email?.toLowerCase() === id || (c.phone && c.phone.trim() === id)
-    );
-    if (found) {
-      writeAdminSession(false);
-      setIsAdmin(false);
-      setCurrentCandidate(found);
-      setCurrentUser(found);
-      navigateTo("/profil");
-      return { success: true };
-    }
-
-    // 2) Demo administrator (samo u prototip režimu — vidi src/config.js).
-    if (DEMO_ADMIN && id === DEMO_ADMIN.identifier && password === DEMO_ADMIN.password) {
-      return enterAdmin();
-    }
-
-    // 3) Administrator sa nalogom na backendu.
-    if (id.includes("@") && (await loginAdminWithBackend(id, password))) {
-      return enterAdmin();
-    }
-
-    return {
-      success: false,
-      error:
-        "Nalog sa ovim podacima ne postoji. Prijaviti se može samo kandidat koji je aktivirao nalog verifikacionim kodom iz agencije.",
-    };
+    return { success: false, error: admin.error || candidate.error };
   };
+
+  // Server je jedini izvor istine o sesiji: istekao kolačić znači odjavu i u pregledaču.
+  useEffect(() => {
+    if (!isAdmin && !currentCandidate && !PORTAL_PATHS.includes(currentHref().split("?")[0])) return;
+    let cancelled = false;
+    fetchSessionRole().then(({ reachable, role }) => {
+      if (cancelled || !reachable) return;
+      if (role === "admin") {
+        writeAdminSession(true);
+        setIsAdmin(true);
+        setCurrentCandidate(null);
+      } else if (role === "candidate") {
+        writeAdminSession(false);
+        setIsAdmin(false);
+        setCurrentCandidate((prev) => prev || getCurrentUser() || {});
+      } else {
+        writeAdminSession(false);
+        clearCurrentUser();
+        setIsAdmin(false);
+        setCurrentCandidate(null);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleRegisterSubmit = (candidateProfile) => {
     writeAdminSession(false);
@@ -209,12 +215,13 @@ export default function App() {
     navigateTo("/profil");
   };
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
     setIsAdmin(false);
     setCurrentCandidate(null);
-    clearCurrentUser();
     writeAdminSession(false);
+    portalSynced.current = false;
     navigateTo("/");
+    await logoutSession();
   };
 
   // Ruta
@@ -241,13 +248,13 @@ export default function App() {
   }, [basePath]);
 
   // Stanje portala sa backenda treba samo prijavljenima i stranama naloga — javni posetilac ga ne preuzima.
-  const needsPortalState = loggedIn || PORTAL_PATHS.includes(basePath);
+  const needsPortalState = loggedIn;
   useEffect(() => {
     if (!needsPortalState || portalSynced.current) return;
     portalSynced.current = true;
-    syncFromBackend(currentCandidate?.email).then((data) => {
+    syncFromBackend().then((data) => {
       if (data?.candidate) {
-        setCurrentCandidate((prev) => (prev ? { ...prev, ...data.candidate } : prev));
+        setCurrentCandidate((prev) => (prev ? { ...prev, ...data.candidate } : data.candidate));
       }
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -328,6 +335,8 @@ export default function App() {
         return <Contact />;
       case "/zaboravljena-lozinka":
         return <ForgotPassword onNavigate={handleNavigate} loginHref="/prijava" />;
+      case "/nova-lozinka":
+        return <ResetPassword onNavigate={handleNavigate} loginHref="/prijava" forgotHref="/zaboravljena-lozinka" />;
       case "/registracija":
         return (
           <Register onNavigate={handleNavigate} onSubmit={handleRegisterSubmit} loginHref="/prijava" applyHref="/prijava-online" />

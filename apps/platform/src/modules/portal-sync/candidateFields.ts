@@ -136,6 +136,19 @@ export function sanitizeCandidateUpdate(
     }
     result[key] = value
   }
+  // Jedini prelaz statusa dosijea koji sme kandidat: slanje (ili ponovno slanje posle dopune)
+  // na pregled. Odobrenje i vraćanje ostaju samo agenciji.
+  const resubmits =
+    incoming.documentsSubmittedForReview === true &&
+    incoming.documentsVerificationStatus === 'pending' &&
+    existing?.documentsApproved !== true &&
+    existing?.documentsVerificationStatus !== 'approved'
+  if (resubmits) {
+    result.documentsVerificationStatus = 'pending'
+    result.documentsRejectionReason = ''
+    const stage = existing?.status
+    if (stage === undefined || ['registered', 'review', 'in_review', 'docs'].includes(String(stage))) result.status = 'docs'
+  }
   if (existing) {
     for (const key of Object.keys(existing)) {
       if (isAdminOnly(key) || PAYMENT_STATUS.test(key)) {

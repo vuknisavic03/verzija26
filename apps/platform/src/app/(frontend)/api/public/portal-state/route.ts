@@ -23,6 +23,7 @@ import {
 } from '@/modules/portal-sync/access.ts'
 import { PortalJobError, selectPortalJob } from '@/modules/portal-sync/portalJobActions.ts'
 import { normalizeJobInput, offeredJobsFor, publicJob } from '@/modules/portal-sync/portalJobs.ts'
+import { notifyAgencyChanges, notifyCandidateChanges } from '@/modules/portal-sync/portalNotifications.ts'
 import { readTranslation, translationApproved } from '@/modules/portal-sync/portalTranslationRules.ts'
 import { isSameOriginRequest } from '@/modules/security/sameOrigin.ts'
 
@@ -110,6 +111,7 @@ export async function POST(request: Request) {
           actor.email,
         )
         const candidate = await savePortalCandidate(clean)
+        notifyAgencyChanges(existing as unknown as Record<string, unknown>, candidate as unknown as Record<string, unknown>)
         return json({ candidate, candidates: [candidate], invitations: [] })
       }
       if (action === 'selectJob') {
@@ -163,6 +165,7 @@ export async function POST(request: Request) {
         }
       }
       const candidate = await savePortalCandidate(next as never)
+      notifyCandidateChanges(existing, candidate as unknown as Record<string, unknown>)
       const state = await getPortalState()
       return json({
         candidate,

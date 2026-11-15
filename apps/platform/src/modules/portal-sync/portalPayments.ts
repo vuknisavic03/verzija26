@@ -13,6 +13,7 @@ import {
   PortalPaymentError,
   portalInstallmentAmounts,
 } from './portalPaymentRules.ts'
+import { notifyCandidate } from './portalNotifications.ts'
 
 export * from './portalPaymentRules.ts'
 
@@ -214,6 +215,14 @@ export async function confirmPortalPayment(input: ConfirmPortalPaymentInput) {
   updates.notes = candidate.notes ? `${String(candidate.notes)}\n${line}` : line
 
   const saved = await savePortalCandidate({ ...(candidate as object), ...updates } as never)
+  notifyCandidate(saved as unknown as Record<string, unknown>, {
+    details: {
+      amount: amountUsd.toLocaleString('sr-Latn-RS'),
+      installment: input.installment === 'FULL' ? 'cela cena' : `${input.installment}. rata`,
+      invoiceNumber: String(created.invoiceNumber),
+    },
+    kind: 'paymentConfirmed',
+  })
   return { alreadyConfirmed: false, candidate: saved, invoice: created }
 }
 

@@ -65,4 +65,35 @@ describe('invitation codes', () => {
     expect(acceptOrGenerateInvitationCode('aa-abcd-efgh')).toBe('AA-ABCD-EFGH')
     expect(acceptOrGenerateInvitationCode('WT-1234')).not.toBe('WT-1234')
   })
+
+  it('lets a candidate resubmit a returned dossier, but never approve it', () => {
+    const returned = {
+      documentsApproved: false,
+      documentsRejectionReason: 'Fali pečat.',
+      documentsVerificationStatus: 'rejected',
+      email: 'sara@test.rs',
+      id: 'c1',
+      status: 'docs',
+    }
+    const resubmitted = sanitizeCandidateUpdate(
+      { documentsSubmittedForReview: true, documentsVerificationStatus: 'pending', status: 'job' },
+      returned,
+      'sara@test.rs',
+    )
+    expect(resubmitted).toMatchObject({ documentsRejectionReason: '', documentsVerificationStatus: 'pending', status: 'docs' })
+
+    const selfApproved = sanitizeCandidateUpdate(
+      { documentsApproved: true, documentsSubmittedForReview: true, documentsVerificationStatus: 'approved' },
+      returned,
+      'sara@test.rs',
+    )
+    expect(selfApproved).toMatchObject({ documentsApproved: false, documentsVerificationStatus: 'rejected' })
+
+    const afterApproval = sanitizeCandidateUpdate(
+      { documentsSubmittedForReview: true, documentsVerificationStatus: 'pending' },
+      { ...returned, documentsApproved: true, documentsVerificationStatus: 'approved', status: 'job' },
+      'sara@test.rs',
+    )
+    expect(afterApproval).toMatchObject({ documentsVerificationStatus: 'approved', status: 'job' })
+  })
 })

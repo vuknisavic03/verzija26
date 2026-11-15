@@ -2,6 +2,7 @@ import { Forbidden, type Access, type CollectionConfig } from 'payload'
 
 import { readPlatformEnvironment } from '../config/environment.ts'
 import { assertCandidatePassword } from '../modules/candidate-accounts/passwordPolicy.ts'
+import { publicSiteUrl } from '../modules/portal-sync/portalNotificationRules.ts'
 
 const isAdministrator = ({ req }: Parameters<Access>[0]) => req.user?.collection === 'users'
 const administratorFieldAccess = ({ req }: { req: { user?: { collection?: string } | null } }) =>
@@ -14,9 +15,9 @@ const administratorOrOwnAccount: Access = ({ req }) => {
   return { id: { equals: req.user.id } }
 }
 
+/** Link u mejlu vodi na javni sajt (gde je portal), ne na adresu backenda. */
 function candidatePortalUrl(path: string, token: string) {
-  const serverUrl = readPlatformEnvironment().serverUrl.replace(/\/$/, '')
-  return `${serverUrl}${path}?token=${encodeURIComponent(token)}`
+  return `${publicSiteUrl()}${path}?token=${encodeURIComponent(token)}`
 }
 
 export const CandidateAccounts: CollectionConfig = {
@@ -42,8 +43,8 @@ export const CandidateAccounts: CollectionConfig = {
     forgotPassword: {
       expiration: 30 * 60 * 1_000,
       generateEmailHTML: (args) => {
-        const url = candidatePortalUrl('/nalog/nova-lozinka', args?.token ?? '')
-        return `<p>Zatražena je promena lozinke za vaš American Adventure nalog.</p><p><a href="${url}">Postavite novu lozinku</a></p><p>Link važi 30 minuta. Ako zahtev niste poslali vi, zanemarite ovu poruku.</p>`
+        const url = candidatePortalUrl('/nova-lozinka', args?.token ?? '')
+        return `<p>Zatražena je promena lozinke za tvoj American Adventure nalog.</p><p><a href="${url}">Postavi novu lozinku</a></p><p>Link važi 30 minuta. Ako zahtev nisi poslao ti, zanemari ovu poruku; lozinka ostaje ista.</p>`
       },
       generateEmailSubject: () => 'Promena lozinke | American Adventure',
     },
