@@ -10,6 +10,8 @@ const OFFLINE = "Nema veze sa serverom. Proveri internet i probaj ponovo.";
 export const TRANSLATION_FIELD = { faculty: "facultyCertTranslation", police: "policeCertTranslation" };
 export const ORIGINAL_FILE_FIELD = { faculty: "facultyCertFileName", police: "policeCertificateFileName" };
 export const ORIGINAL_URL_FIELD = { faculty: "facultyCertUrl", police: "policeCertificateUrl" };
+/** Uverenje bez prevoda: "requested" (kandidat prijavio) ili "approved" (agencija odobrila). */
+export const NO_TRANSLATION_FIELD = { faculty: "facultyCertNoTranslation", police: "policeCertNoTranslation" };
 
 export function getTranslation(candidate, doc) {
   const value = candidate?.[TRANSLATION_FIELD[doc]];
@@ -24,10 +26,15 @@ export function getTranslation(candidate, doc) {
  *  confirmed    — kandidat potvrdio, čeka agenciju
  *  approved     — agencija odobrila
  *  rejected     — agencija vratila (vidi rejectionReason)
+ *  declared     — kandidat kaže da je uverenje već na engleskom, čeka agenciju
+ *  waived       — agencija odobrila uverenje bez prevoda
  */
 export function translationState(candidate, doc) {
   if (!candidate?.[ORIGINAL_FILE_FIELD[doc]]) return "missing";
+  const noTranslation = candidate?.[NO_TRANSLATION_FIELD[doc]];
+  if (noTranslation === "approved") return "waived";
   const t = getTranslation(candidate, doc);
+  if (noTranslation === "requested" && t?.status !== "approved") return "declared";
   if (!t) return "needed";
   if (t.status === "approved") return "approved";
   if (t.status === "rejected") return "rejected";
@@ -41,12 +48,21 @@ export const TRANSLATION_STATUS_LABEL = {
   confirmed: "Prevod čeka agenciju",
   approved: "Prevod odobren",
   rejected: "Prevod vraćen",
+  declared: "Bez prevoda, čeka agenciju",
+  waived: "Odobreno bez prevoda",
 };
 
 /** Prevod je dovoljan za slanje dosijea kad ga je kandidat potvrdio ili ga je agencija odobrila. */
 export function translationDone(candidate, doc) {
   const state = translationState(candidate, doc);
-  return state === "confirmed" || state === "approved";
+  return ["confirmed", "approved", "declared", "waived"].includes(state);
+}
+
+/** Kandidat: uverenje je već na engleskom (ili dvojezično), pa prevod ne treba — ili povlači tu prijavu. */
+export async function setTranslationNotNeeded(doc, notNeeded) {
+  const res = await post("/api/public/translations/not-needed", { doc, notNeeded: Boolean(notNeeded) });
+  if (!res.ok) return res;
+  return { ok: true, candidate: keep(res.data.candidate) };
 }
 
 export function translationPdfUrl(doc, email) {

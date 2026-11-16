@@ -6,6 +6,7 @@ import {
   resendInvitationEmail,
   getCandidates,
   saveCandidate,
+  saveCandidateToBackend,
   deleteCandidate,
   syncFromBackend,
   downloadEmbassyExport,
@@ -66,6 +67,7 @@ export default function UsersSection({ openCandidateId = null, onOpened = () => 
   // Iskorišćena pozivnica (kandidat se registrovao) više nije posao za agenciju.
   const openInvitations = invitations.filter((i) => i.status !== "registered");
   const [successToast, setSuccessToast] = useState("");
+  const [errorToast, setErrorToast] = useState("");
 
   // Faza 0: Stanja modala i filtera
   const [selectedCallCandidate, setSelectedCallCandidate] = useState(null);
@@ -136,8 +138,15 @@ export default function UsersSection({ openCandidateId = null, onOpened = () => 
     "w-full rounded-lg border border-line-strong bg-white py-2.5 pl-9 pr-3.5 text-sm text-ink transition-colors duration-150 placeholder:text-ink-3/70 focus:border-ink focus:outline-hidden focus:ring-2 focus:ring-ink/10";
 
   // Čuvanje izmena aplikacije kandidata (pun dosije)
-  const handleSaveCandidate = (updatedCandidate, options = {}) => {
-    const saved = saveCandidate(updatedCandidate);
+  const handleSaveCandidate = async (updatedCandidate, options = {}) => {
+    const result = await saveCandidateToBackend(updatedCandidate);
+    if (!result.ok) {
+      // Izmena nije sačuvana na serveru: prozor ostaje otvoren, a admin vidi razlog.
+      setErrorToast(result.error);
+      setTimeout(() => setErrorToast(""), 7000);
+      return false;
+    }
+    const saved = result.candidate;
     setStudents((prev) => {
       const remaining = prev.filter(
         (s) =>
@@ -156,6 +165,7 @@ export default function UsersSection({ openCandidateId = null, onOpened = () => 
       setSuccessToast(`Uspešno sačuvani podaci za: ${saved.firstName} ${saved.lastName}!`);
       setTimeout(() => setSuccessToast(""), 4500);
     }
+    return true;
   };
 
   // Zapis koji je server već sačuvao (npr. overa ugovora): samo osveži listu, bez ponovnog slanja.
@@ -590,6 +600,18 @@ export default function UsersSection({ openCandidateId = null, onOpened = () => 
         }
       />
 
+      {errorToast && (
+        // Iznad otvorenog dosijea, da se vidi i dok je prozor otvoren.
+        <div
+          role="alert"
+          className="fixed inset-x-4 bottom-4 z-[100] mx-auto flex max-w-xl items-start justify-between gap-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-800 shadow-lg"
+        >
+          <span>{errorToast}</span>
+          <button type="button" onClick={() => setErrorToast("")} aria-label="Zatvori obaveštenje" className="rounded p-1 hover:bg-red-100">
+            <XIcon className="h-4 w-4" />
+          </button>
+        </div>
+      )}
       {successToast && (
         <div role="status" className="mb-6 flex items-center justify-between rounded-xl border border-line bg-white px-4 py-3 text-sm font-semibold text-emerald-700">
           <span>{successToast}</span>

@@ -66,7 +66,7 @@ describe('invitation codes', () => {
     expect(acceptOrGenerateInvitationCode('WT-1234')).not.toBe('WT-1234')
   })
 
-  it('lets a candidate resubmit a returned dossier, but never approve it', () => {
+  it('never lets saveCandidate submit or approve a dossier (submission goes through submitDossier)', () => {
     const returned = {
       documentsApproved: false,
       documentsRejectionReason: 'Fali pečat.',
@@ -80,7 +80,8 @@ describe('invitation codes', () => {
       returned,
       'sara@test.rs',
     )
-    expect(resubmitted).toMatchObject({ documentsRejectionReason: '', documentsVerificationStatus: 'pending', status: 'docs' })
+    expect(resubmitted).toMatchObject({ documentsRejectionReason: 'Fali pečat.', documentsVerificationStatus: 'rejected', status: 'docs' })
+    expect(resubmitted.documentsSubmittedForReview).toBeUndefined()
 
     const selfApproved = sanitizeCandidateUpdate(
       { documentsApproved: true, documentsSubmittedForReview: true, documentsVerificationStatus: 'approved' },

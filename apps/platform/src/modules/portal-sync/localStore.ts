@@ -1169,8 +1169,7 @@ export async function savePortalCandidateDs160(candidateIdOrEmail: string | numb
     if (ds160.passportNumber) {
       target.passportNumber = ds160.passportNumber
     }
-    if (ds160.dateOfBirth) target.birthDate = ds160.dateOfBirth
-    if (ds160.passportExpiryDate) target.passportExpiryDate = ds160.passportExpiryDate
+    // Datum rođenja i važenje pasoša ostaju iz očitanih dokumenata (drugi format, provereni podaci).
     if (ds160.gender) target.gender = ds160.gender
     if (ds160.homeAddress) target.address = ds160.homeAddress
     if (ds160.university) target.faculty = ds160.university

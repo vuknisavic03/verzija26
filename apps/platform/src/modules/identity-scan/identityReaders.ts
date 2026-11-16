@@ -3,6 +3,8 @@ import path from 'node:path'
 import sharp from 'sharp'
 import { createWorker, PSM } from 'tesseract.js'
 
+import { describeAnthropicError } from '../ai/anthropicErrors.ts'
+
 import { extractImageFromPdf } from '../passport-ocr/imageUtils.ts'
 import {
   IDENTITY_SYSTEM_PROMPT,
@@ -84,11 +86,23 @@ export async function readWithAi(
   try {
     response = await fetchImpl(API_URL, {
       body: JSON.stringify({
-        max_tokens: 2_000,
-        messages: [{ content: [...blocks, { text: identityUserPrompt(kind, files.length), type: 'text' }], role: 'user' }],
+        max_tokens: 4_000,
+        messages: [
+          {
+            content: [
+              ...blocks,
+              {
+                text: `${identityUserPrompt(kind, files.length)}\n\nAnswer only by calling the ${IDENTITY_TOOL_NAME} tool once. Do not reply with plain text.`,
+                type: 'text',
+              },
+            ],
+            role: 'user',
+          },
+        ],
         model: process.env.IDENTITY_SCAN_MODEL?.trim() || process.env.TRANSLATION_MODEL?.trim() || 'claude-sonnet-5-5',
         system: IDENTITY_SYSTEM_PROMPT,
-        tool_choice: { name: IDENTITY_TOOL_NAME, type: 'tool' },
+        // Neki modeli ne dozvoljavaju nametnut alat (tool_choice "tool"/"any"); „auto" radi sa svima.
+        tool_choice: { type: 'auto' },
         tools: [IDENTITY_TOOL],
       }),
       headers: { 'anthropic-version': '2023-06-01', 'content-type': 'application/json', 'x-api-key': apiKey },
@@ -101,17 +115,9 @@ export async function readWithAi(
     clearTimeout(timer)
   }
   if (!response.ok) {
-    // Telo greške se ne loguje: može da sadrži delove dokumenta.
-    const hint =
-      response.status === 401
-        ? ' — ANTHROPIC_API_KEY nije ispravan.'
-        : response.status === 404
-          ? ' — model ne postoji (IDENTITY_SCAN_MODEL).'
-          : response.status === 429
-            ? ' — prekoračen limit ili nema kredita na Anthropic nalogu.'
-            : ''
-    console.error(`Identity scan API error ${response.status}${hint} Prelazi se na lokalno čitanje MRZ-a.`)
-    if (response.status === 400) throw new IdentityScanError('Fajl ne može da se pročita (prevelik ili oštećen). Okači jasnu fotografiju.', 400)
+    // U log ide samo tip i kratka poruka servisa (bez sadržaja dokumenta).
+    const failure = await describeAnthropicError(response)
+    console.error(`Identity scan API error ${failure.log} Prelazi se na lokalno čitanje MRZ-a.`)
     throw new IdentityScanError('Očitavanje trenutno ne radi. Pokušaj ponovo za minut ili upiši podatke ručno.')
   }
   const body = (await response.json().catch(() => null)) as {

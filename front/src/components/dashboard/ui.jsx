@@ -412,3 +412,61 @@ export function Notice({ tone = "neutral", title, aside, className = "", childre
     </div>
   );
 }
+
+/* ---------- Zadaci po tabovima ---------- */
+// Zadatak sa `area` se radi u svom tabu: "docs" u Dokumentima, "pay" u Uplatama.
+// U Aplikaciji takav zadatak stoji samo kao red sa stanjem i linkom ka tabu.
+
+const PAY_ANCHOR = { payment1: "pay-rate1", payment2: "pay-rate2", payment3: "pay-rate3", visafee: "pay-visa" };
+
+/** Gde se zadatak radi: [view, anchorId]. */
+export function taskTarget(task) {
+  if (task?.area === "pay") return ["uplate", PAY_ANCHOR[task.id] || null];
+  if (task?.area === "docs") return ["dokumenta", `task-${task.id}`];
+  return ["put", task ? `task-${task.id}` : null];
+}
+
+const AREA_LABEL = { docs: "Dokumenta", pay: "Uplate" };
+
+/** Zadaci koraka u Aplikaciji: svoji zadaci, a dokumenta i uplate kao kratki redovi sa linkom. */
+export function StageTasks({ tasks, quiet = false, goTo }) {
+  const own = tasks.filter((t) => !t.area);
+  const linked = tasks.filter((t) => t.area);
+  return (
+    <>
+      {own.length > 0 && <TaskList tasks={own} quiet={quiet} />}
+      {linked.length > 0 && (
+        <section aria-label="Dokumenta i uplate za ovaj korak">
+          <p className="mb-2 text-[13px] text-ink-3">Dokumenta i uplate za ovaj korak</p>
+          <ul className={cx(cardCls, "divide-y divide-line overflow-hidden")}>
+            {linked.map((t) => {
+              const [view, anchor] = taskTarget(t);
+              return (
+                <li key={t.id}>
+                  <button
+                    type="button"
+                    onClick={() => goTo?.(view, anchor)}
+                    className="flex w-full items-center gap-3.5 px-5 py-3 text-left hover:bg-surface/60 sm:px-6"
+                  >
+                    <TaskIcon state={t.state === "current" ? "current" : t.state} className="h-4 w-4" />
+                    <span className={cx("min-w-0 flex-1 truncate text-sm", t.state === "locked" ? "text-ink-3" : "text-ink-2")}>
+                      {t.title}
+                    </span>
+                    {t.status && (
+                      <span className={cx("hidden shrink-0 text-[13px] sm:inline", STATUS_TONE[t.state] || STATUS_TONE.current)}>
+                        {t.status}
+                      </span>
+                    )}
+                    <span className="shrink-0 text-[13px] font-medium text-ink underline decoration-line-strong underline-offset-4">
+                      {AREA_LABEL[t.area]}
+                    </span>
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        </section>
+      )}
+    </>
+  );
+}

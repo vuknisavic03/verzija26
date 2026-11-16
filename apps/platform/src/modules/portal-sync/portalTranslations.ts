@@ -11,6 +11,9 @@ import {
   checkTranslation,
   hasTranslatedContent,
   MAX_AI_ATTEMPTS_PER_DAY,
+  NO_TRANSLATION_FIELD,
+  type NoTranslationState,
+  noTranslationState,
   normalizeTranslationData,
   type PortalTranslation,
   readTranslation,
@@ -78,6 +81,8 @@ function attemptsOf(candidate: Candidate) {
 
 /** AI prevod otpremljenog originala. Kandidat za sebe, agencija za bilo kog kandidata. */
 export async function createAiTranslation(input: {
+  /** Agencija nema dnevni limit i u poruci vidi razlog greške servisa. */
+  byAgency?: boolean
   doc: TranslationDoc
   email: string
   translate?: typeof translateWithAi
@@ -92,7 +97,7 @@ export async function createAiTranslation(input: {
   const now = new Date()
   const attempts = attemptsOf(candidate)
   const recent = recentAttempts(attempts[input.doc], now)
-  if (recent.length >= MAX_AI_ATTEMPTS_PER_DAY) {
+  if (!input.byAgency && recent.length >= MAX_AI_ATTEMPTS_PER_DAY) {
     throw new PortalTranslationError(
       'Danas si već nekoliko puta pokušao prevod ovog dokumenta. Pokušaj sutra ili okači overen prevod sudskog tumača.',
       429,
@@ -112,7 +117,14 @@ export async function createAiTranslation(input: {
       mimeType: original.mimeType,
     })
   } catch (error) {
-    if (error instanceof TranslationUnavailableError) throw new PortalTranslationError(error.message, error.status)
+    if (error instanceof TranslationUnavailableError) {
+      // Servis nije odgovorio (kredit, ključ, mreža): pokušaj se ne računa u dnevni limit.
+      if (error.status !== 400) {
+        await savePortalCandidate({ ...(candidate as object), translationAttempts: { ...attempts, [input.doc]: recent } } as never)
+      }
+      const detail = input.byAgency && error.detail ? ` Razlog: ${error.detail}` : ''
+      throw new PortalTranslationError(`${error.message}${detail}`, error.status)
+    }
     throw error
   }
 
@@ -186,9 +198,36 @@ export async function attachUploadedTranslation(input: {
   )
 }
 
-/** Novi original poništava prethodni prevod. */
+/** Novi original poništava prethodni prevod i oznaku „bez prevoda". */
 export function clearTranslation(candidate: Candidate, doc: TranslationDoc) {
-  return withTranslation(candidate, doc, null)
+  return { ...withTranslation(candidate, doc, null), [NO_TRANSLATION_FIELD[doc]]: '' }
+}
+
+/**
+ * Uverenje bez prevoda. Kandidat prijavljuje ('requested') ili povlači (''); agencija odobrava
+ * ('approved') ili traži prevod ('').
+ */
+export async function setNoTranslation(input: {
+  by: 'agency' | 'candidate'
+  doc: TranslationDoc
+  email: string
+  value: NoTranslationState
+}) {
+  const candidate = await load(input.email)
+  if (!candidate[TRANSLATION_DOCS[input.doc].sourceFileName] && !candidate[TRANSLATION_DOCS[input.doc].sourceUrl]) {
+    throw new PortalTranslationError('Prvo okači uverenje.', 409)
+  }
+  if (input.by === 'candidate') {
+    if (input.value === 'approved') throw new PortalTranslationError('Ovo odobrava agencija.', 403)
+    const status = String(candidate.documentsVerificationStatus || '')
+    if (candidate.documentsApproved === true || status === 'approved' || status === 'pending') {
+      throw new PortalTranslationError('Dosije je na pregledu, pa se dokumenta ne menjaju dok traje provera.', 409)
+    }
+    if (noTranslationState(candidate, input.doc) === 'approved') {
+      throw new PortalTranslationError('Agencija je već odobrila uverenje bez prevoda.', 409)
+    }
+  }
+  return savePortalCandidate({ ...candidate, [NO_TRANSLATION_FIELD[input.doc]]: input.value } as never)
 }
 
 /** Agencija: ispravka teksta, odobrenje ili vraćanje kandidatu. */

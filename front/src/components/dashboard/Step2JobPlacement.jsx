@@ -1,13 +1,22 @@
 // front/src/components/dashboard/Step2JobPlacement.jsx
-// Korak 2: izbor posla → intervju → Job Offer → II rata. Uplatnica sa QR kodom je u sekciji "Uplate".
+// Korak 2: izbor posla → intervju → potpisan Job Offer (okači ga) → II rata. Uplatnica sa QR kodom je u sekciji "Uplate".
 import { Button } from "../ui";
 import { getOfferedJobsForCandidate } from "../../data/jobsStore";
-import { StepShell, TaskList, Actions, LinkButton, StatusPill } from "./ui";
+import { jobOfferState } from "../../data/candidateStore";
+import { StepShell, StageTasks, Actions, LinkButton, StatusPill, RemoveFileButton } from "./ui";
+
+export const JOB_OFFER_STATUS = {
+  locked: "Posle intervjua",
+  missing: "Čeka da ga okačiš",
+  pending: "Agencija proverava",
+  rejected: "Vraćen na ispravku",
+  approved: "Odobren",
+};
 
 export function jobAppStatus(candidate) {
   return (
     candidate.jobApplicationStatus ||
-    (candidate.jobOfferSignedAt || (candidate.hasJob && candidate.jobApplicationStatus === "ACCEPTED")
+    (candidate.jobOfferSignedAt || candidate.jobOfferFileName
       ? "ACCEPTED"
       : candidate.selectedJobEmployer
       ? "APPLIED"
@@ -38,7 +47,9 @@ export function buildJobTasks(ctx) {
     isSecondInstallmentPending,
     handleReportSecondInstallment,
     setShowJobFairModal,
-    setShowJobOfferModal,
+    pickJobOffer,
+    canRemoveDocument,
+    removeDocument,
     openPaymentSlip,
     goTo,
   } = ctx;
@@ -47,7 +58,7 @@ export function buildJobTasks(ctx) {
   const appStatus = jobAppStatus(candidate);
   const hasSelectedJob = Boolean(candidate.selectedJobTitle || candidate.selectedJobEmployer);
   const jobFailed = appStatus === "NO_SLOTS" || appStatus === "REJECTED";
-  const offerSigned = Boolean(candidate.jobOfferSignedAt || candidate.jobOfferAccepted);
+  const offer = jobOfferState(candidate);
   const rate2 = Number(candidate.secondInstallmentAmount) || 400;
 
   const tasks = [
@@ -90,7 +101,7 @@ export function buildJobTasks(ctx) {
         ? "wait"
         : "locked",
       status: hasConfirmedJob
-        ? "Poslodavac te je izabrao"
+        ? "Poslodavac ti nudi posao"
         : appStatus === "NO_SLOTS"
         ? "Nema termina"
         : appStatus === "REJECTED"
@@ -149,25 +160,52 @@ export function buildJobTasks(ctx) {
     },
     {
       id: "offer",
-      title: "Potpiši Job Offer",
-      state: offerSigned ? "done" : hasConfirmedJob ? "current" : "locked",
-      status: offerSigned ? "Potpisan" : hasConfirmedJob ? "Čeka potpis" : "Posle intervjua",
-      desc: offerSigned
-        ? null
-        : hasConfirmedJob
-        ? "Proveri poziciju, satnicu i smeštaj, pa potpiši."
-        : null,
-      render: (isNext) => (
-        <Button variant={offerSigned ? "outline" : isNext ? "primary" : "dark"} size="sm" onClick={() => setShowJobOfferModal(true)}>
-          {offerSigned ? "Pogledaj Job Offer" : "Pregledaj i potpiši"}
-        </Button>
-      ),
+      area: "docs",
+      waitText: "Agencija proverava tvoj Job Offer",
+      title: "Okači potpisan Job Offer",
+      state: offer === "approved" ? "done" : offer === "pending" ? "wait" : offer === "rejected" ? "danger" : offer === "missing" ? "current" : "locked",
+      status: JOB_OFFER_STATUS[offer],
+      desc:
+        offer === "missing"
+          ? "Job Offer ti šalje poslodavac. Odštampaj ga, potpiši i okači ovde — agencija ga proverava zajedno sa ostalim dokumentima."
+          : offer === "rejected"
+          ? `Agencija je vratila Job Offer: ${String(candidate.jobOfferRejectionReason || "pogledaj napomenu").replace(/[.\s]+$/, "")}. Okači ispravljen.`
+          : offer === "pending"
+          ? candidate.jobOfferFileName
+          : null,
+      render: (isNext) => {
+        if (offer === "locked") return null;
+        if (offer === "approved")
+          return candidate.jobOfferUrl ? (
+            <a href={candidate.jobOfferUrl} target="_blank" rel="noreferrer" className="text-sm font-medium text-ink underline underline-offset-4">
+              Otvori Job Offer
+            </a>
+          ) : null;
+        if (offer === "pending")
+          return (
+            <Actions>
+              {candidate.jobOfferUrl && (
+                <a href={candidate.jobOfferUrl} target="_blank" rel="noreferrer" className="text-sm font-medium text-ink underline underline-offset-4">
+                  Otvori
+                </a>
+              )}
+              <LinkButton onClick={pickJobOffer}>Zameni</LinkButton>
+              {canRemoveDocument?.("jobOffer") && <RemoveFileButton onConfirm={() => removeDocument("jobOffer")} />}
+            </Actions>
+          );
+        return (
+          <Button variant={isNext ? "primary" : "dark"} size="sm" onClick={pickJobOffer}>
+            {offer === "rejected" ? "Okači ispravljen Job Offer" : "Okači potpisan Job Offer"}
+          </Button>
+        );
+      },
     },
   ];
 
   if (!isFull) {
     tasks.push({
       id: "payment2",
+      area: "pay",
       waitText: "Proveravamo uplatu II rate",
       title: `Uplati II ratu — ${rate2} USD`,
       state: isSecondInstallmentPaid ? "done" : isSecondInstallmentPending ? "wait" : hasConfirmedJob ? "current" : "locked",
@@ -177,7 +215,7 @@ export function buildJobTasks(ctx) {
         ? "Proveravamo uplatu"
         : hasConfirmedJob
         ? "Čeka uplatu"
-        : "Posle Job Offer-a",
+        : "Kad poslodavac ponudi posao",
       desc: isSecondInstallmentPaid
         ? null
         : isSecondInstallmentPending
@@ -222,14 +260,14 @@ export default function Step2JobPlacement({ ctx, quiet, compact }) {
       state={isStep2Done ? "done" : !isDocumentsApproved ? "locked" : "current"}
       kicker="Korak 2"
       title={isFull ? "Posao i Job Offer" : "Posao, Job Offer i II rata"}
-      description="Biraš posao, razgovaraš sa poslodavcem i potpisuješ radni ugovor."
+      description="Biraš posao, razgovaraš sa poslodavcem, a potpisan Job Offer okačiš ovde."
       status={
         <StatusPill tone={isStep2Done ? "done" : isSecondInstallmentPending ? "wait" : "neutral"}>
           {isStep2Done ? "Završeno" : isSecondInstallmentPending ? "Čeka našu potvrdu" : !isDocumentsApproved ? "Otvara se posle Koraka 1" : "U toku"}
         </StatusPill>
       }
     >
-      <TaskList tasks={tasks} quiet={quiet} />
+      <StageTasks tasks={tasks} quiet={quiet} goTo={ctx.goTo} />
     </StepShell>
   );
 }

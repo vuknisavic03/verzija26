@@ -4,6 +4,7 @@
 import { CANDIDATES_KEY, INVITATIONS_KEY, loadData, saveData } from "./storage.js";
 import { INITIAL_CANDIDATES, INITIAL_INVITATIONS } from "./mockSeed.js";
 import { getCandidates, getCurrentUser, setCurrentUser } from "./session.js";
+import { jobOfferState } from "./jobOffer.js";
 
 /**
  * Računa popunjenost studentskog profila i CV-ja za potrebe interne validacije (0-100)
@@ -28,80 +29,6 @@ export function calculateProfileScore(candidate) {
  * Vraća precizne informacije o trenutnom koraku kandidata (bez procenata).
  * Korak 0 se prikazuje kao "Registracija", a završni koraci kao "Čekanje na vizu" / "Viza odobrena".
  */
-
-export const DS160_REQUIRED_FIELDS = [
-  "lastNameAndMaiden",
-  "firstName",
-  "dateOfBirth",
-  "birthPlace",
-  "jmbg",
-  "passportNumber",
-  "passportExpiryDate",
-  "employerInfo",
-  "supervisorName",
-  "stayAddress",
-  "employerPhone",
-  "homeAddress",
-  "mobilePhone",
-  "gender",
-  "tripFunder",
-  "previousUsTravel",
-  "visaRefusal",
-  "university",
-  "referencePerson1",
-  "referencePerson2",
-  "emergencyContact",
-];
-
-export function getDs160Status(ds160) {
-  if (!ds160 || typeof ds160 !== "object") {
-    return {
-      isComplete: false,
-      isStarted: false,
-      filledCount: 0,
-      totalCount: DS160_REQUIRED_FIELDS.length,
-      label: "Za popunjavanje",
-    };
-  }
-
-  const filledCount = DS160_REQUIRED_FIELDS.filter(
-    (k) => String(ds160[k] || "").trim().length > 0
-  ).length;
-  const anyFilled = Object.values(ds160).some((v) => String(v || "").trim().length > 0);
-  const isComplete = filledCount === DS160_REQUIRED_FIELDS.length;
-
-  if (isComplete) {
-    return {
-      isComplete: true,
-      isStarted: true,
-      filledCount,
-      totalCount: DS160_REQUIRED_FIELDS.length,
-      label: "Kompletno popunjen",
-    };
-  }
-
-  if (anyFilled) {
-    return {
-      isComplete: false,
-      isStarted: true,
-      filledCount,
-      totalCount: DS160_REQUIRED_FIELDS.length,
-      label: "U toku (Delimično)",
-    };
-  }
-
-  return {
-    isComplete: false,
-    isStarted: false,
-    filledCount: 0,
-    totalCount: DS160_REQUIRED_FIELDS.length,
-    label: "Za popunjavanje",
-  };
-}
-
-export function isDs160Complete(ds160) {
-  return getDs160Status(ds160).isComplete;
-}
 
 export function getCandidateStepInfo(candidate) {
   if (!candidate) {
@@ -205,7 +132,8 @@ export function getCandidateStepInfo(candidate) {
     };
   }
 
-  if (rawStatus === "departure" || (docsApproved && hasJob && r2Paid)) {
+  const offer = jobOfferState(candidate);
+  if (rawStatus === "departure" || (docsApproved && offer === "approved" && r2Paid)) {
     const hasDs160 = candidate.ds160 && Object.keys(candidate.ds160).length > 0;
     let subLabel = "Priprema za Ambasadu i viziranje";
     if (!hasDs160) subLabel = "Popunjavanje DS-160 upitnika";
@@ -229,23 +157,29 @@ export function getCandidateStepInfo(candidate) {
         ? `Intervju zakazan (${candidate.interviewScheduledAt})`
         : "Intervju sa poslodavcem zakazan";
     } else if (candidate.jobApplicationStatus === "NO_SLOTS") {
-      subLabel = "Nema termina za intervju — potreban novi izbor";
+      subLabel = "Poslodavac nema mesta — kandidat bira drugi posao";
     } else if (candidate.jobApplicationStatus === "REJECTED") {
-      subLabel = "Poslodavac odbio kandidata — potreban novi izbor";
+      subLabel = "Poslodavac je odbio — kandidat bira drugi posao";
     } else if (candidate.jobApplicationStatus === "APPLIED") {
-      subLabel = "Prijava za posao poslata — čeka termin";
+      subLabel = "Zakaži razgovor sa poslodavcem";
     } else if (!candidate.selectedJobTitle && !candidate.selectedJobEmployer && !hasJob) {
       subLabel = "Izbor radne ponude iz kataloga poslova";
-    } else if (!candidate.jobOfferSignedAt && !hasJob) {
-      subLabel = "Čeka potvrdu poslodavca / Job Offer";
+    } else if (!hasJob) {
+      subLabel = "Čeka odluku poslodavca";
+    } else if (offer === "missing") {
+      subLabel = "Poslodavac nudi posao — kandidat okačuje Job Offer";
+    } else if (offer === "pending") {
+      subLabel = "Job Offer čeka tvoju proveru";
+    } else if (offer === "rejected") {
+      subLabel = "Job Offer vraćen kandidatu";
     } else if (candidate.secondInstallmentStatus === "pending" && !r2Paid) {
-      subLabel = "II rata prijavljena — čeka potvrdu";
+      subLabel = "II rata prijavljena — proveri izvod";
     } else if (!r2Paid) {
       subLabel = candidate.paymentMethod === "now"
         ? "Izbor posla i priprema intervjua"
         : `Čeka uplatu II rate (${candidate.secondInstallmentAmount || 400} USD)`;
     } else {
-      subLabel = candidate.paymentMethod === "now" ? "Posao potvrđen" : "Posao i II rata potvrđeni";
+      subLabel = candidate.paymentMethod === "now" ? "Job Offer odobren" : "Job Offer odobren, II rata proknjižena";
     }
 
     return {
@@ -264,19 +198,19 @@ export function getCandidateStepInfo(candidate) {
         stepNumber: 0,
         stepKey: "review",
         stepTitle: "Registracija",
-        subLabel: "Ugovor odbijen — potreban novi upload",
+        subLabel: "Ugovor vraćen kandidatu",
         badgeCls: "bg-red-100 text-red-700 border-transparent",
         dotCls: "bg-red-500",
       };
     }
     let subLabel = "Prikupljanje dokumenata i CV";
     if (candidate.documentsVerificationStatus === "rejected") {
-      subLabel = "Dosije vraćen na dopunu";
+      subLabel = "Dosije vraćen kandidatu";
     } else if (
       candidate.documentsVerificationStatus === "pending" ||
       candidate.documentsSubmittedForReview
     ) {
-      subLabel = "Dosije poslat — čeka odobrenje admina";
+      subLabel = "Dosije čeka tvoju proveru";
     }
     return {
       stepNumber: 1,
@@ -291,19 +225,19 @@ export function getCandidateStepInfo(candidate) {
   // Default za registrovane kandidate: Registracija (nekadašnji Korak 0)
   let regSubLabel = "Potpisivanje ugovora i I rata";
   if (!candidate.contractSigned && !candidate.signedContractFileName) {
-    regSubLabel = "Čeka otpremanje potpisanog ugovora";
+    regSubLabel = "Čeka kandidata: potpisan ugovor";
   } else if (candidate.contractVerificationStatus === "rejected") {
-    regSubLabel = "Ugovor odbijen — potreban novi upload";
+    regSubLabel = "Ugovor vraćen kandidatu";
   } else if (!contractApproved && candidate.firstInstallmentStatus === "pending" && !r1Paid) {
-    regSubLabel = "Čeka overu ugovora i potvrdu I rate";
+    regSubLabel = "Ugovor čeka tvoju proveru, I rata prijavljena";
   } else if (!contractApproved) {
-    regSubLabel = "Ugovor poslat — čeka overu admina";
+    regSubLabel = "Ugovor čeka tvoju proveru";
   } else if (candidate.firstInstallmentStatus === "pending" && !r1Paid) {
-    regSubLabel = "I rata prijavljena — čeka potvrdu admina";
+    regSubLabel = "I rata prijavljena — proveri izvod";
   } else if (!r1Paid) {
     regSubLabel = candidate.paymentMethod === "now"
-      ? `Ugovor overen • Čeka uplatu programa u celosti (${candidate.finalPrice || 1750} USD)`
-      : `Ugovor overen • Čeka uplatu I rate (${candidate.firstInstallmentAmount || 250} USD)`;
+      ? `Ugovor odobren • Čeka uplatu programa u celosti (${candidate.finalPrice || 1750} USD)`
+      : `Ugovor odobren • Čeka uplatu I rate (${candidate.firstInstallmentAmount || 250} USD)`;
   }
 
   return {
@@ -366,7 +300,8 @@ function applyReactiveWorkflowTransitions(cand, explicitStatusProvided = false) 
     c.jobApplicationStatus !== "NO_SLOTS" &&
     c.jobApplicationStatus !== "REJECTED"
   );
-  const hasJob = isJobConfirmed;
+  // Posao je potvrđen tek kad agencija odobri potpisan Job Offer.
+  const hasJob = isJobConfirmed && jobOfferState(c) === "approved";
   const hasVisa = Boolean(c.hasVisa);
 
   c.hasJob = hasJob;
@@ -415,6 +350,33 @@ const FILE_FIELDS = [
   ["passportScanDataUrl", "passportScanUrl"],
   ["passportImage", "passportScanUrl"],
 ];
+
+/**
+ * Snimanje sa čekanjem na server (admin „Sačuvaj"): lokalno se upisuje tek ono što je server prihvatio.
+ * Vraća { ok, candidate } ili { ok: false, error } — npr. kad server odbije odobrenje dosijea bez prevoda.
+ */
+export async function saveCandidateToBackend(candidate) {
+  try {
+    const res = await fetch("/api/public/portal-state", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify({ action: "saveCandidate", payload: candidate }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.status === 401 || res.status === 403) {
+      return { ok: false, error: "Nisi prijavljen kao agencija u ovom pregledaču. Prijavi se ponovo kao admin." };
+    }
+    if (!res.ok || !data.candidate) return { ok: false, error: data.message || "Izmene nisu sačuvane. Probaj ponovo." };
+    const fromServer = { ...data.candidate };
+    for (const [dataKey, linkKey] of FILE_FIELDS) {
+      if (String(fromServer[linkKey] || "").includes("documents/upload?doc=")) fromServer[dataKey] = undefined;
+    }
+    return { ok: true, candidate: saveCandidate(fromServer, { skipRemoteSync: true }) };
+  } catch {
+    return { ok: false, error: "Nema veze sa serverom. Proveri internet i probaj ponovo." };
+  }
+}
 
 export function saveCandidate(candidate, options = {}) {
   const list = getCandidates();
@@ -822,7 +784,29 @@ export async function uploadSignedContractWithBackend(file, email) {
 }
 
 /**
- * Kandidat briše dokument koji je okačio (cv, facultyCert, policeCert, signedContract).
+ * Potpisan Job Offer (od poslodavca). Ide agenciji na proveru uz ostala dokumenta.
+ * Vraća { success, candidate } ili { success: false, error }.
+ */
+export async function uploadJobOfferWithBackend(file, email) {
+  try {
+    const form = new FormData();
+    form.append("file", file);
+    form.append("type", "jobOffer");
+    if (email) form.append("email", email);
+    const res = await fetch("/api/public/documents/upload", { method: "POST", body: form, credentials: "include" });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.success === false) {
+      return { success: false, error: data.message || "Job Offer nije okačen. Probaj ponovo." };
+    }
+    const saved = data.candidate ? saveCandidate(data.candidate, { skipRemoteSync: true }) : null;
+    return { success: true, candidate: saved, fileName: data.fileName || file.name, message: data.message };
+  } catch {
+    return { success: false, error: "Nema veze sa serverom. Proveri internet i probaj ponovo." };
+  }
+}
+
+/**
+ * Kandidat briše dokument koji je okačio (cv, facultyCert, policeCert, signedContract, jobOffer).
  * Vraća { ok, candidate, message } ili { ok: false, error }.
  */
 export async function removeDocumentWithBackend(type) {
@@ -840,31 +824,41 @@ export async function removeDocumentWithBackend(type) {
   }
 }
 
-export async function saveCandidateDs160WithBackend(candidateId, email, ds160) {
-  const candidates = loadData(CANDIDATES_KEY, []);
-  const idx = candidates.findIndex(
-    (c) =>
-      (candidateId && String(c.id) === String(candidateId)) ||
-      (email && c.email?.toLowerCase() === email?.toLowerCase())
-  );
-  if (idx >= 0) {
-    saveCandidate({ ...candidates[idx], ds160 });
-  }
+/**
+ * Kandidat čuva DS-160 odgovore. Uspeh se javlja tek kad ih server sačuva.
+ * Vraća { ok, candidate } ili { ok: false, error }.
+ */
+export async function saveCandidateDs160WithBackend(ds160) {
   try {
     const res = await fetch("/api/public/portal-state", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        action: "saveDs160",
-        payload: { candidateId, email, ds160 },
-      }),
+      credentials: "include",
+      body: JSON.stringify({ action: "saveDs160", payload: { ds160 } }),
     });
-    if (res.ok && res.headers.get("content-type")?.includes("application/json")) {
-      return await res.json();
-    }
-    return { success: true };
-  } catch (err) {
-    return { success: false, message: err.message };
+    const data = await res.json().catch(() => ({}));
+    if (res.status === 401) return { ok: false, error: "Sesija je istekla. Prijavi se ponovo, pa sačuvaj upitnik." };
+    if (!res.ok || !data.candidate) return { ok: false, error: data.message || "Upitnik nije sačuvan. Probaj ponovo." };
+    return { ok: true, candidate: saveCandidate(data.candidate, { skipRemoteSync: true }) };
+  } catch {
+    return { ok: false, error: "Nema veze sa serverom. Upitnik nije sačuvan — probaj ponovo." };
+  }
+}
+
+/** Kandidat javlja da je platio viznu taksu Ambasadi SAD (ili povlači tu oznaku). */
+export async function reportVisaFeeWithBackend(paid = true) {
+  try {
+    const res = await fetch("/api/public/portal-state", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify({ action: "reportVisaFee", payload: { paid: Boolean(paid) } }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.candidate) return { ok: false, error: data.message || "Nije sačuvano. Probaj ponovo." };
+    return { ok: true, candidate: saveCandidate(data.candidate, { skipRemoteSync: true }) };
+  } catch {
+    return { ok: false, error: "Nema veze sa serverom. Probaj ponovo." };
   }
 }
 
@@ -991,13 +985,22 @@ export function reportInstallmentPayment(candidateIdOrEmail, installmentNumber) 
  * Agencija overava ili vraća potpisan ugovor. Izmenu radi server nad svojim zapisom i šalje
  * kandidatu mejl; uspeh se javlja tek kad server potvrdi. Vraća { ok, candidate } ili { ok: false, error }.
  */
-export async function verifyCandidateContract(email, approved = true, reason = "") {
+export function verifyCandidateContract(email, approved = true, reason = "") {
+  return adminVerify("verifyContract", email, approved, reason);
+}
+
+/** Agencija odobrava ili vraća potpisan Job Offer (server radi nad svežim zapisom). */
+export function verifyCandidateJobOffer(email, approved = true, reason = "") {
+  return adminVerify("verifyJobOffer", email, approved, reason);
+}
+
+async function adminVerify(action, email, approved, reason) {
   try {
     const res = await fetch("/api/public/portal-state", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       credentials: "include",
-      body: JSON.stringify({ action: "verifyContract", payload: { approved: Boolean(approved), email, reason } }),
+      body: JSON.stringify({ action, payload: { approved: Boolean(approved), email, reason } }),
     });
     const data = await res.json().catch(() => ({}));
     if (res.status === 401 || res.status === 403) {
@@ -1018,33 +1021,30 @@ export async function verifyCandidateContract(email, approved = true, reason = "
  * @param {boolean} approved
  * @param {string} note
  */
-export function verifyCandidateDocuments(candidateIdOrEmail, approved = true, note = "") {
-  const candidates = loadData(CANDIDATES_KEY, []);
-  const idx = candidates.findIndex(
-    (c) =>
-      (candidateIdOrEmail && String(c.id) === String(candidateIdOrEmail)) ||
-      (c.email && c.email.toLowerCase() === String(candidateIdOrEmail).toLowerCase())
-  );
-  if (idx < 0) return null;
-
-  const nowIso = new Date().toISOString();
-  const dateStr = new Date().toLocaleDateString("sr-RS");
-  const c = { ...candidates[idx] };
-  c.documentsVerificationStatus = approved ? "approved" : "rejected";
-  c.documentsApproved = Boolean(approved);
-  c.documentsVerifiedAt = nowIso;
-  if (approved) {
-    c.documentsRejectionReason = "";
-    c.status = "job";
-    const log = `[${dateStr}]: Dosije i dokumentacija (Korak 1) ODOBRENI. Kandidat prebačen na Korak 2: Posao i ponuda.`;
-    c.notes = c.notes ? `${c.notes}\n${log}` : log;
-  } else {
-    c.documentsRejectionReason = note || "Dokumentacija nije kompletna ili čitljiva.";
-    c.documentsRejectedAt = nowIso;
-    const log = `[${dateStr}]: Dokumentacija vraćena na dopunu (${c.documentsRejectionReason}).`;
-    c.notes = c.notes ? `${c.notes}\n${log}` : log;
+async function portalAction(action, payload, fallbackError) {
+  try {
+    const res = await fetch("/api/public/portal-state", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify({ action, payload }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.status === 401) return { ok: false, error: "Sesija je istekla. Prijavi se ponovo." };
+    if (res.status === 403) return { ok: false, error: "Nisi prijavljen sa odgovarajućim nalogom u ovom pregledaču. Prijavi se ponovo." };
+    if (!res.ok || !data.candidate) return { ok: false, error: data.message || fallbackError };
+    return { ok: true, candidate: saveCandidate(data.candidate, { skipRemoteSync: true }) };
+  } catch {
+    return { ok: false, error: "Nema veze sa serverom. Proveri internet i probaj ponovo." };
   }
-  if (note) c.documentsVerificationNote = note;
+}
 
-  return saveCandidate(c);
+/** Agencija odobrava ili vraća dosije; server proverava prevode i obaveštava kandidata. */
+export function verifyCandidateDocuments(email, approved = true, reason = "") {
+  return portalAction("verifyDocuments", { approved: Boolean(approved), email, reason }, "Izmena nije sačuvana. Probaj ponovo.");
+}
+
+/** Kandidat šalje dosije na pregled; server proverava da je sve okačeno i prevedeno. */
+export function submitDossierWithBackend() {
+  return portalAction("submitDossier", {}, "Dosije nije poslat. Probaj ponovo.");
 }

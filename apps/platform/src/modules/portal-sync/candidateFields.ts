@@ -4,6 +4,12 @@
  */
 const ADMIN_ONLY_FIELDS = new Set([
   'id',
+  // Slanje dosijea ide samo preko akcije submitDossier (server proverava da je sve tu).
+  'documentsSubmittedForReview',
+  'documentsSubmittedAt',
+  // Uverenje bez prevoda: menja se samo preko /api/public/translations/not-needed i admin pregleda.
+  'facultyCertNoTranslation',
+  'policeCertNoTranslation',
   'email',
   'basePrice',
   'discount',
@@ -59,7 +65,13 @@ const ADMIN_ONLY_FIELDS = new Set([
   'jobOfferDetails',
   'jobOfferSignature',
   'jobOfferSignedAt',
+  // Potpisan Job Offer upisuje samo server (otpremanje fajla), a proverava ga agencija.
+  'jobOfferFileName',
+  'jobOfferUrl',
+  'jobOfferUploadedAt',
   'secondInstallmentDue',
+  // Vizna taksa: menja se samo akcijom reportVisaFee.
+  'visaFeeReportedAt',
   'ds2019Status',
   'ds2019Number',
   'embassyInterviewDate',
@@ -91,6 +103,19 @@ const SERVER_MANAGED_FIELDS = [
   'translationAttempts',
   'facultyCertAiTranslation',
   'policeCertificateTranslated',
+  'facultyCertNoTranslation',
+  'policeCertNoTranslation',
+  // Potpisan Job Offer: otpremanje (kandidat) i provera (akcija verifyJobOffer).
+  'jobOfferFileName',
+  'jobOfferUrl',
+  'jobOfferUploadedAt',
+  'jobOfferVerificationStatus',
+  'jobOfferRejectionReason',
+  'jobOfferRejectedAt',
+  'jobOfferVerifiedAt',
+  'jobOfferAccepted',
+  'jobOfferSignedAt',
+  'visaFeeReportedAt',
 ] as const
 
 export function keepServerManagedFields(
@@ -135,19 +160,6 @@ export function sanitizeCandidateUpdate(
       if (value !== 'pending' && value !== current) continue
     }
     result[key] = value
-  }
-  // Jedini prelaz statusa dosijea koji sme kandidat: slanje (ili ponovno slanje posle dopune)
-  // na pregled. Odobrenje i vraćanje ostaju samo agenciji.
-  const resubmits =
-    incoming.documentsSubmittedForReview === true &&
-    incoming.documentsVerificationStatus === 'pending' &&
-    existing?.documentsApproved !== true &&
-    existing?.documentsVerificationStatus !== 'approved'
-  if (resubmits) {
-    result.documentsVerificationStatus = 'pending'
-    result.documentsRejectionReason = ''
-    const stage = existing?.status
-    if (stage === undefined || ['registered', 'review', 'in_review', 'docs'].includes(String(stage))) result.status = 'docs'
   }
   if (existing) {
     for (const key of Object.keys(existing)) {

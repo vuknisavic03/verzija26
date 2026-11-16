@@ -1,8 +1,8 @@
-import { TRANSLATION_DOCS } from './portalTranslationRules.ts'
+import { NO_TRANSLATION_FIELD, TRANSLATION_DOCS } from './portalTranslationRules.ts'
 
 type Candidate = Record<string, unknown>
 
-export type RemovableDocument = 'cv' | 'facultyCert' | 'policeCert' | 'signedContract'
+export type RemovableDocument = 'cv' | 'facultyCert' | 'policeCert' | 'signedContract' | 'jobOffer'
 
 export class DocumentRemovalError extends Error {
   constructor(message: string, readonly status: 400 | 404 | 409) {
@@ -15,6 +15,7 @@ const FIELDS: Record<RemovableDocument, { label: string; prefix: string }> = {
   facultyCert: { label: 'Uverenje o studiranju', prefix: 'facultyCert' },
   policeCert: { label: 'Uverenje o nekažnjavanju', prefix: 'policeCertificate' },
   signedContract: { label: 'Potpisan ugovor', prefix: 'signedContract' },
+  jobOffer: { label: 'Job Offer', prefix: 'jobOffer' },
 }
 
 export function isRemovableDocument(value: string): value is RemovableDocument {
@@ -47,6 +48,10 @@ export function removeCandidateDocument(candidate: Candidate, type: RemovableDoc
     if (candidate.firstInstallmentApproved === true || installment === 'pending' || installment === 'paid') {
       throw new DocumentRemovalError('Uplata je već prijavljena, pa ugovor ne može da se obriše. Okači novi ako treba.', 409)
     }
+  } else if (type === 'jobOffer') {
+    if (candidate.jobOfferVerificationStatus === 'approved') {
+      throw new DocumentRemovalError('Agencija je već odobrila Job Offer, pa ne može da se obriše. Javi se agenciji.', 409)
+    }
   } else if (dossierLocked(candidate)) {
     throw new DocumentRemovalError('Dosije je predat na pregled, pa se dokumenta ne menjaju dok traje provera.', 409)
   }
@@ -59,12 +64,17 @@ export function removeCandidateDocument(candidate: Candidate, type: RemovableDoc
     [`${prefix}Url`]: '',
   }
   if (type === 'facultyCert' || type === 'policeCert') {
-    const doc = TRANSLATION_DOCS[type === 'facultyCert' ? 'faculty' : 'police']
+    const key = type === 'facultyCert' ? 'faculty' : 'police'
+    const doc = TRANSLATION_DOCS[key]
     next[doc.field] = null
     next[doc.flag] = false
+    next[NO_TRANSLATION_FIELD[key]] = ''
   }
   if (type === 'signedContract') {
     Object.assign(next, { contractRejectionReason: '', contractSigned: false, contractVerificationStatus: '' })
+  }
+  if (type === 'jobOffer') {
+    Object.assign(next, { jobOfferRejectionReason: '', jobOfferVerificationStatus: '' })
   }
   return { label, next, url }
 }

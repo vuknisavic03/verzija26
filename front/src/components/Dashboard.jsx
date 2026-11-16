@@ -7,7 +7,12 @@ import {
   syncFromBackend,
   uploadDocumentWithBackend,
   uploadSignedContractWithBackend,
+  uploadJobOfferWithBackend,
+  reportVisaFeeWithBackend,
+  jobOfferState,
   removeDocumentWithBackend,
+  submitDossierWithBackend,
+  setTranslationNotNeeded,
   readFileAsDataUrl,
   saveCandidateDs160WithBackend,
   getDs160Status,
@@ -22,11 +27,10 @@ import {
 import InvoicesSheet from "./dashboard/modals/InvoicesSheet";
 import ProfileBuilderModal from "./ProfileBuilderModal";
 import JobFairModal from "./JobFairModal";
-import JobOfferModal from "./JobOfferModal";
 
 import DashboardHeader, { MobileNav } from "./dashboard/DashboardHeader";
 import ApplicationTimeline from "./dashboard/ApplicationTimeline";
-import { openTask } from "./dashboard/ui";
+import { openTask, taskTarget } from "./dashboard/ui";
 import Step0Registration, { buildRegistrationTasks } from "./dashboard/Step0Registration";
 import Step1Documents, { buildDocumentTasks } from "./dashboard/Step1Documents";
 import Step2JobPlacement, { buildJobTasks } from "./dashboard/Step2JobPlacement";
@@ -222,10 +226,8 @@ export default function Dashboard({
   const isDocumentsPending = Boolean(
     !isDocumentsApproved &&
     !isDocumentsRejected &&
-    (candidate.documentsVerificationStatus === "pending" ||
-      candidate.documentsSubmittedForReview ||
-      status === "docs" ||
-      status === "in_review")
+    // „docs" je i korak Dokumenta (pre slanja), pa predat dosije prepoznajemo samo po slanju na pregled.
+    (candidate.documentsVerificationStatus === "pending" || candidate.documentsSubmittedForReview || status === "in_review")
   );
   const isStep1Done = Boolean(isDocumentsApproved);
 
@@ -243,7 +245,7 @@ export default function Dashboard({
     candidate.paymentMethod !== "now" &&
     candidate.secondInstallmentStatus === "pending"
   );
-  const isStep2Done = Boolean(hasConfirmedJob && isSecondInstallmentPaid);
+  const isStep2Done = Boolean(hasConfirmedJob && jobOfferState(candidate) === "approved" && isSecondInstallmentPaid);
 
   // Gate 4: Viza, III Rata / PKZ & Polazak (Korak 3 -> Završeno)
   const isThirdInstallmentPaid = Boolean(
@@ -304,7 +306,6 @@ export default function Dashboard({
   const [slipRequest, setSlipRequest] = useState(null);
   const profileScore = calculateProfileScore(candidate);
   const [showJobFairModal, setShowJobFairModal] = useState(false);
-  const [showJobOfferModal, setShowJobOfferModal] = useState(false);
   const interviewScheduled = Boolean(
     candidate.jobApplicationStatus === "SCHEDULED" ||
     candidate.interviewScheduled ||
@@ -335,6 +336,7 @@ export default function Dashboard({
   };
 
   const signedContractInputRef = useRef(null);
+  const jobOfferInputRef = useRef(null);
   const [isUploadingSignedContract, setIsUploadingSignedContract] = useState(false);
 
   // Rukovaoci čekanja i simulacije uplata / verifikacija
@@ -478,33 +480,25 @@ export default function Dashboard({
       translationDone(candidate, "police")
   );
 
-  const handleSubmitForReview = () => {
-    if (!isRequirementsMet) return;
+  const [isSubmittingDossier, setIsSubmittingDossier] = useState(false);
+  const handleSubmitForReview = async () => {
+    if (!isRequirementsMet || isSubmittingDossier) return;
+    const wasRejected = isDocumentsRejected;
+    setIsSubmittingDossier(true);
+    const res = await submitDossierWithBackend();
+    setIsSubmittingDossier(false);
+    if (!res.ok) {
+      flash(res.error, 7000);
+      return;
+    }
+    setCandidate((prev) => ({ ...(prev || {}), ...res.candidate }));
     setApplicationSubmitted(true);
-    const dateStr = new Date().toLocaleDateString("sr-RS");
-    const wasRejected = Boolean(
-      candidate.documentsVerificationStatus === "rejected" || candidate.documentsRejectionReason
-    );
-    const noteEntry = wasRejected
-      ? `[${dateStr}]: Kandidat je dopunio dosije i poslao na ponovni pregled nakon obrazloženja.`
-      : `[${dateStr}]: Kandidat je priložio kompletan dosije (CV + uverenje sa fakulteta + MUP uverenje sa prevodom).`;
-    const newNotes = candidate.notes ? `${candidate.notes}\n${noteEntry}` : noteEntry;
-    updateCandidateState({
-      status: "docs",
-      progress: 55,
-      notes: newNotes,
-      documentsSubmittedForReview: true,
-      documentsVerificationStatus: "pending",
-      documentsApproved: false,
-      documentsRejectionReason: "",
-      documentsRejectedAt: null,
-    });
-    setUploadToast(
+    flash(
       wasRejected
-        ? "Dopunjeni dosije je poslat koordinatoru na ponovni pregled!"
-        : "Dosije je poslat na verifikaciju — čeka se odobrenje koordinatora i sponzora."
+        ? "Dopunjen dosije je poslat koordinatoru na ponovni pregled."
+        : "Dosije je poslat na pregled. Javićemo ti mejlom kad ga koordinator pregleda.",
+      6000
     );
-    setTimeout(() => setUploadToast(""), 5000);
   };
 
   const goHome = (e) => {
@@ -532,6 +526,12 @@ export default function Dashboard({
   /** Prebaci na sekciju (i korak) i skroluj do elementa. */
   const goTo = (nextView, anchorId, stage) => {
     setView(nextView);
+    // Uplata iz „Sledećeg koraka" odmah otvara svoju uplatnicu.
+    const rate = /^pay-rate(\d)$/.exec(anchorId || "");
+    if (rate) {
+      setSlipRequest(rate[1] === "1" && candidate?.paymentMethod === "now" ? "FULL" : rate[1]);
+      return;
+    }
     if (stage) setActiveStepTab(stage);
     if (anchorId?.startsWith("task-")) setTimeout(() => openTask(anchorId.slice(5)), 0);
     setTimeout(() => {
@@ -548,13 +548,46 @@ export default function Dashboard({
 
   // Svi fajl-inputi žive na jednom mestu — dugmad u koracima i u "Dokumentima" ih samo otvaraju.
   const pickSignedContract = () => signedContractInputRef.current?.click();
+  const pickJobOffer = () => jobOfferInputRef.current?.click();
+  const handleReportVisaFee = async (paid) => {
+    const res = await reportVisaFeeWithBackend(paid);
+    if (!res.ok) {
+      flash(res.error, 6000);
+      return;
+    }
+    setCandidate((prev) => ({ ...(prev || {}), ...res.candidate }));
+    flash(paid ? "Zabeleženo: vizna taksa je plaćena. Potvrdu ponesi na razgovor u ambasadi." : "Oznaka o uplati vizne takse je skinuta.");
+  };
+  const handleUploadJobOffer = async (file) => {
+    if (!file) return;
+    flash("Kačim Job Offer…", 20000);
+    const res = await uploadJobOfferWithBackend(file, candidate.email);
+    if (!res.success) {
+      flash(res.error, 6000);
+      return;
+    }
+    if (res.candidate) setCandidate((prev) => ({ ...(prev || {}), ...res.candidate }));
+    flash(res.message || "Potpisan Job Offer je okačen. Agencija ga proverava.", 6000);
+  };
   const pickCv = () => cvInputRef.current?.click();
+
+  // Uverenje je već na engleskom: prevod ne treba (agencija to potvrđuje).
+  const markNoTranslation = async (doc, notNeeded) => {
+    const res = await setTranslationNotNeeded(doc, notNeeded);
+    if (!res.ok) {
+      flash(res.error, 6000);
+      return;
+    }
+    if (res.candidate) setCandidate((prev) => ({ ...(prev || {}), ...res.candidate }));
+    flash(notNeeded ? "Označeno: uverenje je već na engleskom. Agencija će to potvrditi." : "Oznaka je skinuta. Možeš da napraviš prevod.");
+  };
 
   // Brisanje okačenog dokumenta (iste provere radi i server: dosije na pregledu, overen ugovor, prijavljena uplata).
   const canRemoveDocument = (type) => {
     if (type === "signedContract") {
       return Boolean(hasSignedContract && !isContractApproved && !isFirstInstallmentPaid && !isFirstInstallmentPending);
     }
+    if (type === "jobOffer") return Boolean(candidate.jobOfferFileName) && jobOfferState(candidate) !== "approved";
     return !(isDocumentsApproved || isDocumentsPending);
   };
   const removeDocument = async (type) => {
@@ -603,6 +636,7 @@ export default function Dashboard({
     pickSignedContract,
     canRemoveDocument,
     removeDocument,
+    markNoTranslation,
     setShowSignContractModal,
     handlePaymentSlipClick,
     handleReportFirstInstallment,
@@ -613,6 +647,7 @@ export default function Dashboard({
     isDocumentsRejected,
     isRequirementsMet,
     handleSubmitForReview,
+    isSubmittingDossier,
     setShowProfileBuilderModal,
     setShowVideoModal,
     isYoutubeEditing,
@@ -636,7 +671,8 @@ export default function Dashboard({
     isSecondInstallmentPending,
     handleReportSecondInstallment,
     setShowJobFairModal,
-    setShowJobOfferModal,
+    pickJobOffer,
+    handleReportVisaFee,
     // Korak 3
     isStep3Done,
     isDeparture,
@@ -708,7 +744,13 @@ export default function Dashboard({
         : isSecondInstallmentPending
         ? "Proveravamo II ratu"
         : hasConfirmedJob
-        ? "Job Offer"
+        ? jobOfferState(candidate) === "pending"
+          ? "Job Offer na proveri"
+          : jobOfferState(candidate) === "rejected"
+          ? "Job Offer vraćen"
+          : jobOfferState(candidate) === "approved"
+          ? "Job Offer odobren"
+          : "Okači Job Offer"
         : !isDocumentsApproved
         ? "Posle odobrenog dosijea"
         : candidate.jobApplicationStatus === "SCHEDULED" || interviewScheduled
@@ -754,12 +796,14 @@ export default function Dashboard({
     }
     const todo = currentStage.tasks.find((x) => x.state === "current" || x.state === "danger");
     if (todo) {
+      // Dokumenta i uplate vode u svoj tab, ostalo u Aplikaciju.
+      const [targetView, anchor] = taskTarget(todo);
       return {
         kind: "do",
         stageLabel: currentStage.label,
         title: todo.title,
         cta: todo.state === "danger" ? "Reši" : "Kreni",
-        onGo: () => goTo("put", `task-${todo.id}`, currentStage.id),
+        onGo: () => goTo(targetView, anchor, currentStage.id),
       };
     }
     const waiting =
@@ -769,9 +813,15 @@ export default function Dashboard({
       title: waiting?.waitText || waiting?.title || "Proveravamo tvoje podatke",
       desc: waiting?.desc || "Javljamo ti se čim završimo. Ne moraš ništa da radiš.",
       cta: "Detalji",
-      onGo: () => goTo("put", waiting ? `task-${waiting.id}` : null, currentStage.id),
+      onGo: () => {
+        const [targetView, anchor] = waiting ? taskTarget(waiting) : ["put", null];
+        goTo(targetView, anchor, currentStage.id);
+      },
     };
   })();
+
+  // Tab Dokumenta prikazuje dokumenta po koracima, istim redom kao proces.
+  ctx.stages = stages;
 
   const paymentDue =
     (hasSignedContract && !isFirstInstallmentPaid && !isFirstInstallmentPending ? 1 : 0) +
@@ -856,6 +906,19 @@ export default function Dashboard({
         }}
       />
       <input
+        ref={jobOfferInputRef}
+        type="file"
+        accept=".pdf,application/pdf,image/*"
+        className="sr-only"
+        tabIndex={-1}
+        aria-hidden="true"
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          e.target.value = "";
+          handleUploadJobOffer(file);
+        }}
+      />
+      <input
         ref={cvInputRef}
         type="file"
         accept=".pdf,application/pdf,.doc,.docx,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
@@ -916,45 +979,19 @@ export default function Dashboard({
           candidate={candidate}
           onClose={() => setShowDs160Modal(false)}
           onSave={async (ds160Data) => {
-            const candFirst = ds160Data.firstName || candidate.firstName || "";
-            const candLast = ds160Data.lastNameAndMaiden || candidate.lastName || "";
-            const candName = `${candFirst} ${candLast}`.trim() || candidate.name;
-            const dsStatus = getDs160Status(ds160Data);
-            const updates = {
-              ds160: ds160Data,
-              ds160Filled: dsStatus.isComplete,
-              firstName: candFirst,
-              lastName: candLast,
-              name: candName,
-              gender: ds160Data.gender || candidate.gender,
-              maritalStatus: ds160Data.maritalStatus || candidate.maritalStatus,
-              birthDate: ds160Data.dateOfBirth || candidate.birthDate,
-              dateOfBirth: ds160Data.dateOfBirth || candidate.birthDate,
-              birthPlace: ds160Data.birthPlace || candidate.birthPlace,
-              birthCountry: ds160Data.birthCountry || candidate.birthCountry,
-              citizenship: ds160Data.citizenship || candidate.citizenship,
-              jmbg: ds160Data.jmbg || candidate.jmbg,
-              passportNumber: ds160Data.passportNumber || candidate.passportNumber,
-              passportExpiryDate: ds160Data.passportExpiryDate || candidate.passportExpiryDate,
-              passportExpiry: ds160Data.passportExpiryDate || candidate.passportExpiry,
-              phone: ds160Data.mobilePhone || candidate.phone,
-              email: ds160Data.primaryEmail || candidate.email,
-              address: ds160Data.homeAddress || candidate.address,
-              faculty: ds160Data.university || candidate.faculty,
-            };
-            updateCandidateState(updates);
-            setShowDs160Modal(false);
-            setUploadToast(
+            // Čuva se na serveru; poruka o uspehu tek kad server potvrdi.
+            const res = await saveCandidateDs160WithBackend(ds160Data);
+            if (!res.ok) return res;
+            setCandidate((prev) => ({ ...(prev || {}), ...res.candidate }));
+            const dsStatus = getDs160Status(res.candidate.ds160);
+            if (dsStatus.isComplete) setShowDs160Modal(false);
+            flash(
               dsStatus.isComplete
-                ? "DS-160 upitnik je kompletno popunjen i sačuvan!"
-                : "DS-160 upitnik je sačuvan kao radna verzija (delimično popunjen)."
+                ? "DS-160 upitnik je kompletan i sačuvan."
+                : `Sačuvano. Još ${dsStatus.missing.length} obaveznih polja — vidiš ih u upitniku.`,
+              5000
             );
-            try {
-              await saveCandidateDs160WithBackend(ds160Data, candidate.email, candidate.id);
-            } catch (err) {
-              console.warn("DS-160 backend sync error:", err);
-            }
-            setTimeout(() => setUploadToast(""), 4500);
+            return res;
           }}
         />
       )}
@@ -1001,19 +1038,6 @@ export default function Dashboard({
         />
       )}
 
-      {/* MODAL: JOB OFFER PREGLED I DIGITALNO POTPISIVANJE */}
-      {showJobOfferModal && (
-        <JobOfferModal
-          isOpen={showJobOfferModal}
-          onClose={() => setShowJobOfferModal(false)}
-          candidate={candidate}
-          onSigned={(signed) => {
-            setCandidate((prev) => ({ ...(prev || {}), ...signed }));
-            setUploadToast("Job Offer je potpisan. Podaci poslodavca su upisani u tvoj DS-160.");
-            setTimeout(() => setUploadToast(""), 5000);
-          }}
-        />
-      )}
     </div>
   );
 }

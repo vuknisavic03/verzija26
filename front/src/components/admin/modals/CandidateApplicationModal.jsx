@@ -5,10 +5,12 @@ import {
   PROGRAM_PACKAGES,
   getPromotions,
   uploadDocumentWithBackend,
+  uploadJobOfferWithBackend,
   verifyCandidateContract,
   verifyCandidateDocuments,
   getCandidateStepInfo,
   getDs160Status,
+  DS160_FIELDS,
   openPrintableContractWindow,
   confirmPortalPaymentAdmin,
   fetchPortalInvoices,
@@ -17,8 +19,10 @@ import {
   INSTALLMENT_LABEL,
   syncFromBackend,
   translationState,
-  TRANSLATION_STATUS_LABEL,
+  verifyCandidateJobOffer,
+  jobOfferState,
 } from "../../../data/candidateStore";
+import { REVIEW, reviewKey, ADMIN_TRANSLATION, PAYMENT, EMPLOYER } from "../reviewStatus";
 import TranslationReview from "../TranslationReview";
 import { formatRsd } from "../../../data/invoicesStore";
 import ProfileBuilderModal from "../../ProfileBuilderModal";
@@ -174,15 +178,15 @@ export default function CandidateApplicationModal({ candidate, onSave, onSaved, 
   const [selectedJobCity, setSelectedJobCity] = useState(candidate.selectedJobCity || "");
   const [selectedJobWage, setSelectedJobWage] = useState(candidate.selectedJobWage || "");
   const [selectedJobHousing, setSelectedJobHousing] = useState(candidate.selectedJobHousing || "");
-  const [hasJob, setHasJob] = useState(
-    Boolean(
-      (candidate.jobApplicationStatus === "ACCEPTED" || candidate.jobOfferSignedAt || candidate.hasJob) &&
-      candidate.jobApplicationStatus !== "SCHEDULED" &&
-      candidate.jobApplicationStatus !== "APPLIED" &&
-      candidate.jobApplicationStatus !== "NO_SLOTS" &&
-      candidate.jobApplicationStatus !== "REJECTED"
-    )
-  );
+  // Potpisan Job Offer: kandidat ga okači, agencija ga odobri ili vrati (serverska akcija).
+  const [jobOffer, setJobOffer] = useState(() => ({
+    fileName: candidate.jobOfferFileName || "",
+    url: candidate.jobOfferUrl || "",
+    reason: candidate.jobOfferRejectionReason || "",
+    state: jobOfferState(candidate),
+  }));
+  // Kandidat ima posao tek kad agencija odobri potpisan Job Offer.
+  const hasJob = jobOffer.state === "approved";
 
   const [offerAllJobs, setOfferAllJobs] = useState(candidate.offerAllJobs !== false);
   const [offeredJobIds, setOfferedJobIds] = useState(
@@ -215,9 +219,8 @@ export default function CandidateApplicationModal({ candidate, onSave, onSaved, 
   };
   const facultyTr = translationState(liveCandidate, "faculty");
   const policeTr = translationState(liveCandidate, "police");
-  const translationsApproved = facultyTr === "approved" && policeTr === "approved";
-  const trRowState = (tr) =>
-    tr === "approved" ? "done" : tr === "rejected" ? "danger" : tr === "missing" ? "current" : "wait";
+  const trCleared = (tr) => tr === "approved" || tr === "waived";
+  const translationsApproved = trCleared(facultyTr) && trCleared(policeTr);
   const [policeCertificateFileName, setPoliceCertificateFileName] = useState(
     candidate.policeCertificateFileName || ""
   );
@@ -340,13 +343,7 @@ export default function CandidateApplicationModal({ candidate, onSave, onSaved, 
       discountVerified: Boolean(discountVerified),
       referredBy: referredBy.trim(),
       groupCode: groupCode.trim().toUpperCase(),
-      hasJob: Boolean(
-        (hasJob || jobApplicationStatus === "ACCEPTED") &&
-        jobApplicationStatus !== "SCHEDULED" &&
-        jobApplicationStatus !== "APPLIED" &&
-        jobApplicationStatus !== "NO_SLOTS" &&
-        jobApplicationStatus !== "REJECTED"
-      ),
+      hasJob,
       offerAllJobs,
       offeredJobIds,
       jobApplicationStatus,
@@ -552,29 +549,53 @@ export default function CandidateApplicationModal({ candidate, onSave, onSaved, 
     );
   };
 
-  const handleVerifyDocumentsAction = (approved, reason = "") => {
-    verifyCandidateDocuments(candidate.id || email, approved, reason);
-    const nextDocStatus = approved ? "approved" : "rejected";
-    setDocumentsVerificationStatus(nextDocStatus);
-    setDocumentsApproved(approved);
-    if (!approved) setDocumentsRejectionReason(reason);
-    else setDocumentsRejectionReason("");
-
-    const nextStatus = approved ? "job" : status;
-    if (approved) setStatus("job");
-
-    const updated = buildUpdatedCandidate({
-      documentsVerificationStatus: nextDocStatus,
-      documentsApproved: approved,
-      documentsRejectionReason: approved ? "" : reason,
-      status: nextStatus,
-    });
-    onSave(updated, { keepOpen: true });
-
+  const handleVerifyDocumentsAction = async (approved, reason = "") => {
+    const result = await verifyCandidateDocuments(candidate.email || email, approved, reason);
+    if (!result.ok) {
+      showToast(result.error);
+      return;
+    }
+    const saved = result.candidate;
+    setDocumentsVerificationStatus(saved.documentsVerificationStatus || (approved ? "approved" : "rejected"));
+    setDocumentsApproved(Boolean(saved.documentsApproved));
+    setDocumentsRejectionReason(saved.documentsRejectionReason || "");
+    if (saved.status) setStatus(saved.status);
+    // Lista u adminu dobija zapis sa servera (bez ponovnog slanja).
+    onSaved?.(saved);
     showToast(
       approved
-        ? "Kompletan dosije odobren! Kandidat je automatski prebačen na Korak 2: Posao i ponuda."
-        : "Dokumentacija je vraćena na dopunu. Obrazloženje je prikazano kandidatu na profilu."
+        ? "Dosije je odobren. Kandidat je prebačen na Korak 2: Posao i ponuda i dobio je mejl."
+        : "Dosije je vraćen na dopunu. Kandidat vidi obrazloženje na profilu i dobio je mejl."
+    );
+  };
+
+  const applyJobOfferRecord = (saved) => {
+    setJobOffer({
+      fileName: saved.jobOfferFileName || "",
+      url: saved.jobOfferUrl || "",
+      reason: saved.jobOfferRejectionReason || "",
+      state: jobOfferState(saved),
+    });
+  };
+
+  const handleVerifyJobOfferAction = async (approved, reason = "") => {
+    const result = await verifyCandidateJobOffer(candidate.email || email, approved, reason);
+    if (!result.ok) {
+      showToast(result.error);
+      return;
+    }
+    const saved = result.candidate;
+    applyJobOfferRecord(saved);
+    if (saved.jobApplicationStatus) setJobApplicationStatus(saved.jobApplicationStatus);
+    if (saved.status) setStatus(saved.status);
+    if (saved.ds2019Status) setDs2019Status(saved.ds2019Status);
+    onSaved?.(saved);
+    showToast(
+      approved
+        ? saved.status === "departure"
+          ? "Job Offer je odobren. Program je plaćen, pa je kandidat prebačen na Korak 3. Dobio je mejl."
+          : "Job Offer je odobren. Kandidat sada plaća II ratu i dobio je mejl."
+        : "Job Offer je vraćen. Kandidat vidi razlog na profilu i dobio je mejl."
     );
   };
 
@@ -582,6 +603,19 @@ export default function CandidateApplicationModal({ candidate, onSave, onSaved, 
     if (!file) return;
     setUploadingDocType(type);
     try {
+      if (type === "jobOffer") {
+        const res = await uploadJobOfferWithBackend(file, email);
+        if (!res.success) {
+          showToast(res.error);
+          return;
+        }
+        if (res.candidate) {
+          applyJobOfferRecord(res.candidate);
+          onSaved?.(res.candidate);
+        }
+        showToast("Job Offer je okačen u ime kandidata. Proveri ga i odobri.");
+        return;
+      }
       const res = await uploadDocumentWithBackend(file, type, email, candidate.id);
       if (type === "signedContract") {
         setSignedContractFileName(res.fileName);
@@ -642,7 +676,10 @@ export default function CandidateApplicationModal({ candidate, onSave, onSaved, 
 
   const liveCandidateSnapshot = buildUpdatedCandidate();
   const stepInfo = getCandidateStepInfo(liveCandidateSnapshot);
-  const ds160Entries = Object.entries(candidate.ds160 || {});
+  // DS-160 odgovori redom kao u formi, sa nazivima polja.
+  const ds160Entries = DS160_FIELDS.map((f) => [f, (candidate.ds160 || {})[f.key]]).filter(
+    ([f, v]) => f.required || String(v || "").trim()
+  );
 
   // Finansijski saldo
   const r1Amount = Number(firstInstallmentAmount) || 250;
@@ -677,17 +714,35 @@ export default function CandidateApplicationModal({ candidate, onSave, onSaved, 
   // ================================================================
   const firstPaid = isFull ? Boolean(isFullPaymentPaid || firstInstallmentApproved) : Boolean(firstInstallmentApproved);
   const ds160St = getDs160Status(candidate.ds160);
-  const jobAccepted =
-    jobApplicationStatus === "ACCEPTED" ||
-    (hasJob && !["SCHEDULED", "APPLIED", "NO_SLOTS", "REJECTED"].includes(jobApplicationStatus));
-  const offerSigned = Boolean(candidate.jobOfferSignedAt);
   const docsSubmitted = Boolean(candidate.documentsVerificationStatus === "pending" || candidate.documentsSubmittedForReview);
+  // Poslodavac je ponudio posao (posle razgovora). Job Offer potpisuje kandidat, agencija ga samo proverava.
+  const jobAccepted = jobApplicationStatus === "ACCEPTED" || hasJob;
+  const offerKey =
+    jobOffer.state === "approved"
+      ? "approved"
+      : jobOffer.state === "rejected"
+      ? "returned"
+      : jobOffer.state === "pending"
+      ? "review"
+      : jobAccepted
+      ? "todo"
+      : "later";
+  const offerStatus = REVIEW[offerKey];
+  const contractStatus = REVIEW[
+    reviewKey({ submitted: contractSigned, approved: contractApproved, returned: contractVerificationStatus === "rejected" })
+  ];
+  const dossierStatus = REVIEW[
+    reviewKey({ submitted: docsSubmitted, approved: documentsApproved, returned: documentsVerificationStatus === "rejected" })
+  ];
+  const openJobOffer = () => openDocumentPreview("Potpisan Job Offer", jobOffer.fileName, jobOffer.url, "", "documents");
+  const rejectJobOffer = () =>
+    setRejectionModal({ type: "jobOffer", title: "Vrati Job Offer kandidatu", reason: jobOffer.reason || "" });
   const passportScan = passportScanFileName || passportScanDataUrl || passportScanUrl;
 
   const stages = [
     { id: "reg", label: "Registracija", title: "Ugovor i prva uplata", done: Boolean(contractApproved && firstPaid) },
     { id: "docs", label: "Korak 1", title: "Dokumenta", done: Boolean(documentsApproved) },
-    { id: "job", label: "Korak 2", title: "Posao", done: Boolean(jobAccepted && (isFull || secondInstallmentPaid)) },
+    { id: "job", label: "Korak 2", title: "Posao i Job Offer", done: Boolean(hasJob && (isFull || secondInstallmentPaid)) },
     { id: "visa", label: "Korak 3", title: "Viza i polazak", done: Boolean(hasVisa) },
   ];
   const currentStageId = stages.find((s) => !s.done)?.id || null;
@@ -696,9 +751,9 @@ export default function CandidateApplicationModal({ candidate, onSave, onSaved, 
   const openContract = () =>
     openDocumentPreview("Potpisani ugovor", signedContractFileName, signedContractUrl, signedContractDataUrl, "contract");
   const rejectContract = () =>
-    setRejectionModal({ type: "contract", title: "Vrati ugovor na ispravku", reason: contractRejectionReason || "" });
+    setRejectionModal({ type: "contract", title: "Vrati ugovor kandidatu", reason: contractRejectionReason || "" });
   const rejectDocs = () =>
-    setRejectionModal({ type: "documents", title: "Vrati dosije na dopunu", reason: documentsRejectionReason || "" });
+    setRejectionModal({ type: "documents", title: "Vrati dosije kandidatu", reason: documentsRejectionReason || "" });
 
   // Red čekanja: sve što trenutno traži odluku ili unos agencije.
   const queue = [
@@ -707,7 +762,7 @@ export default function CandidateApplicationModal({ candidate, onSave, onSaved, 
       contractVerificationStatus !== "rejected" && {
         id: "contract",
         tab: "docs",
-        title: "Pregledaj potpisani ugovor",
+        title: "Proveri potpisan ugovor",
         desc: signedContractFileName || "Kandidat je okačio potpisan ugovor.",
         actions: (
           <>
@@ -730,7 +785,7 @@ export default function CandidateApplicationModal({ candidate, onSave, onSaved, 
         id: "pay1",
         tab: "pay",
         title: isFull ? `Potvrdi uplatu programa — ${finalPrice} USD` : `Potvrdi uplatu I rate — ${r1Amount} USD`,
-        desc: "Kandidat je prijavio uplatu. Proveri izvod pa proknjiži.",
+        desc: "Kandidat kaže da je platio. Kad uplata stigne na izvod, proknjiži je.",
         actions: (
           <Button size="sm" variant="dark" onClick={() => openPayForm(isFull ? "full" : 1)}>
             Proknjiži
@@ -742,7 +797,7 @@ export default function CandidateApplicationModal({ candidate, onSave, onSaved, 
       documentsVerificationStatus !== "rejected" && {
         id: "dossier",
         tab: "docs",
-        title: "Pregledaj dosije",
+        title: "Proveri dosije",
         desc: "CV, video i oba uverenja su poslati na pregled.",
         actions: (
           <>
@@ -762,7 +817,7 @@ export default function CandidateApplicationModal({ candidate, onSave, onSaved, 
       !jobAccepted && {
         id: "interview",
         tab: "job",
-        title: "Dogovori razgovor sa poslodavcem",
+        title: "Zakaži razgovor sa poslodavcem",
         desc: `${selectedJobTitle || "Pozicija"} — ${selectedJobEmployer || "poslodavac"}`,
         actions: (
           <Button size="sm" variant="dark" onClick={() => go("job")}>
@@ -773,12 +828,31 @@ export default function CandidateApplicationModal({ candidate, onSave, onSaved, 
     jobApplicationStatus === "SCHEDULED" && {
       id: "outcome",
       tab: "job",
-      title: "Upiši ishod razgovora",
+      title: "Upiši šta je poslodavac odlučio",
       desc: interviewScheduledAt ? `Razgovor: ${interviewScheduledAt.replace("T", " ")}` : "Razgovor je zakazan.",
       actions: (
         <Button size="sm" variant="dark" onClick={() => go("job")}>
           Otvori
         </Button>
+      ),
+    },
+    jobOffer.state === "pending" && {
+      id: "jobOffer",
+      tab: "docs",
+      title: "Proveri potpisan Job Offer",
+      desc: jobOffer.fileName || "Kandidat je okačio potpisan Job Offer.",
+      actions: (
+        <>
+          <Button size="sm" variant="outline" onClick={openJobOffer}>
+            Otvori
+          </Button>
+          <Button size="sm" variant="dark" onClick={() => handleVerifyJobOfferAction(true)}>
+            Odobri
+          </Button>
+          <Button size="sm" variant="ghost" onClick={rejectJobOffer}>
+            Vrati
+          </Button>
+        </>
       ),
     },
     !isFull &&
@@ -787,7 +861,7 @@ export default function CandidateApplicationModal({ candidate, onSave, onSaved, 
         id: "pay2",
         tab: "pay",
         title: `Potvrdi uplatu II rate — ${r2Amount} USD`,
-        desc: "Kandidat je prijavio uplatu.",
+        desc: "Kandidat kaže da je platio. Kad uplata stigne na izvod, proknjiži je.",
         actions: (
           <Button size="sm" variant="dark" onClick={() => openPayForm(2)}>
             Proknjiži
@@ -800,7 +874,7 @@ export default function CandidateApplicationModal({ candidate, onSave, onSaved, 
         id: "pay3",
         tab: "pay",
         title: `Potvrdi uplatu III rate — ${r3Amount} USD`,
-        desc: "Kandidat je prijavio uplatu.",
+        desc: "Kandidat kaže da je platio. Kad uplata stigne na izvod, proknjiži je.",
         actions: (
           <Button size="sm" variant="dark" onClick={() => openPayForm(3)}>
             Proknjiži
@@ -967,6 +1041,8 @@ export default function CandidateApplicationModal({ candidate, onSave, onSaved, 
               )}
             </Section>
 
+            <StatusLegend />
+
             <Section title="Put kandidata">
               <ol className="grid gap-3 sm:grid-cols-4">
                 {stages.map((s) => {
@@ -1000,16 +1076,15 @@ export default function CandidateApplicationModal({ candidate, onSave, onSaved, 
               <Section title="Dokumenta" aside={<button type="button" onClick={() => go("docs")} className={linkCls}>Sva dokumenta</button>}>
                 <ul className="divide-y divide-line">
                   {[
-                    ["Potpisani ugovor", contractApproved ? "done" : contractSigned ? "wait" : "current"],
-                    ["CV", cvFileName ? "done" : "current"],
-                    ["Video", youtubeUrl ? "done" : "current"],
-                    ["Uverenje o studiranju", facultyCertFileName ? trRowState(facultyTr) : "current"],
-                    ["MUP uverenje", policeCertificateFileName ? trRowState(policeTr) : "current"],
-                    ["DS-160", ds160St.isComplete ? "done" : ds160St.isStarted ? "wait" : "current"],
-                  ].map(([n, st]) => (
+                    ["Potpisan ugovor", contractStatus.state, contractStatus.label],
+                    ["Dosije (CV, video, uverenja)", dossierStatus.state, dossierStatus.label],
+                    ["Potpisan Job Offer", offerStatus.state, offerStatus.label],
+                    ["DS-160", ds160St.isComplete ? "done" : ds160St.isStarted ? "wait" : "current", ds160St.isComplete ? "Popunjen" : ds160St.isStarted ? "U izradi" : "Nije počet"],
+                  ].map(([n, st, label]) => (
                     <li key={n} className="flex items-center gap-3 py-2 first:pt-0 last:pb-0">
                       <TaskIcon state={st} className="h-4 w-4" />
-                      <span className="text-sm text-ink-2">{n}</span>
+                      <span className="flex-1 text-sm text-ink-2">{n}</span>
+                      <StatusText state={st}>{label}</StatusText>
                     </li>
                   ))}
                 </ul>
@@ -1033,8 +1108,8 @@ export default function CandidateApplicationModal({ candidate, onSave, onSaved, 
                 <DocRow
                   name="Potpisani ugovor"
                   sub={signedContractFileName || "Kandidat ga još nije okačio"}
-                  state={contractApproved ? "done" : contractVerificationStatus === "rejected" ? "danger" : contractSigned ? "wait" : "current"}
-                  status={contractApproved ? "Odobren" : contractVerificationStatus === "rejected" ? "Vraćen" : contractSigned ? "Čeka pregled" : "Nedostaje"}
+                  state={contractStatus.state}
+                  status={contractStatus.label}
                 >
                   {signedContractFileName && (
                     <button type="button" onClick={openContract} className={linkCls}>
@@ -1042,7 +1117,7 @@ export default function CandidateApplicationModal({ candidate, onSave, onSaved, 
                     </button>
                   )}
                   <Upload busy={uploadingDocType === "signedContract"} onFile={(f) => handleAdminDocUpload(f, "signedContract")} label={signedContractFileName ? "Zameni" : "Okači sken"} />
-                  {contractSigned && !contractApproved && (
+                  {contractSigned && !contractApproved && contractVerificationStatus !== "rejected" && (
                     <>
                       <button type="button" onClick={() => handleVerifyContractAction(true)} className={linkCls}>
                         Odobri
@@ -1054,7 +1129,7 @@ export default function CandidateApplicationModal({ candidate, onSave, onSaved, 
                   )}
                 </DocRow>
                 {contractRejectionReason && !contractApproved && (
-                  <li className="py-2 text-[13px] text-red-700">Razlog: {contractRejectionReason}</li>
+                  <li className="py-2 text-[13px] text-red-700">Razlog vraćanja: {contractRejectionReason}</li>
                 )}
                 <DocRow name="Pasoš" sub={passportScanFileName || "Sken nije okačen"} state={passportScan ? "done" : "current"} status={passportScan ? "Okačen" : "Nedostaje"}>
                   {passportScan && (
@@ -1100,13 +1175,11 @@ export default function CandidateApplicationModal({ candidate, onSave, onSaved, 
               title="Dosije"
               hint="Ovo kandidat šalje na pregled u Koraku 1. Kad je sve u redu, odobri — kandidat prelazi na izbor posla."
               aside={
-                <StatusText state={documentsApproved ? "done" : documentsVerificationStatus === "rejected" ? "danger" : docsSubmitted ? "wait" : "current"}>
-                  {documentsApproved ? "Odobren" : documentsVerificationStatus === "rejected" ? "Vraćen" : docsSubmitted ? "Na pregledu" : "Nije poslat"}
-                </StatusText>
+                <StatusText state={dossierStatus.state}>{docsSubmitted || documentsApproved || documentsVerificationStatus === "rejected" ? dossierStatus.label : "Kandidat ga još nije poslao"}</StatusText>
               }
             >
               <ul className="divide-y divide-line">
-                <DocRow name="CV" sub={cvFileName || "Nije okačen"} state={cvFileName ? "done" : "current"} status={cvFileName ? "Okačen" : "Nedostaje"}>
+                <DocRow name="CV" sub={cvFileName || "Nije okačen"} state={cvFileName ? "done" : "current"} status={cvFileName ? "Okačen" : "Čeka kandidata"}>
                   {(cvDataUrl || cvUrl) && (
                     <button type="button" onClick={() => openDocumentPreview("CV", cvFileName, cvUrl, cvDataUrl, "documents")} className={linkCls}>
                       Otvori
@@ -1117,7 +1190,7 @@ export default function CandidateApplicationModal({ candidate, onSave, onSaved, 
                     Profil i CV builder
                   </button>
                 </DocRow>
-                <DocRow name="Video predstavljanje" sub={youtubeUrl || "Link nije dodat"} state={youtubeUrl ? "done" : "current"} status={youtubeUrl ? "Dodat" : "Nedostaje"}>
+                <DocRow name="Video predstavljanje" sub={youtubeUrl || "Link nije dodat"} state={youtubeUrl ? "done" : "current"} status={youtubeUrl ? "Dodat" : "Čeka kandidata"}>
                   <input
                     type="url"
                     value={youtubeUrl}
@@ -1134,8 +1207,8 @@ export default function CandidateApplicationModal({ candidate, onSave, onSaved, 
                 <DocRow
                   name="Uverenje o studiranju"
                   sub={facultyCertFileName || "Nije okačeno"}
-                  state={facultyCertFileName ? trRowState(facultyTr) : "current"}
-                  status={facultyCertFileName ? TRANSLATION_STATUS_LABEL[facultyTr] : "Nedostaje"}
+                  state={facultyCertFileName ? ADMIN_TRANSLATION[facultyTr].state : "current"}
+                  status={facultyCertFileName ? ADMIN_TRANSLATION[facultyTr].label : "Čeka kandidata"}
                 >
                   {(facultyCertDataUrl || facultyCertUrl) && (
                     <button
@@ -1152,8 +1225,8 @@ export default function CandidateApplicationModal({ candidate, onSave, onSaved, 
                 <DocRow
                   name="Uverenje o nekažnjavanju (MUP)"
                   sub={policeCertificateFileName || "Nije okačeno"}
-                  state={policeCertificateFileName ? trRowState(policeTr) : "current"}
-                  status={policeCertificateFileName ? TRANSLATION_STATUS_LABEL[policeTr] : "Nedostaje"}
+                  state={policeCertificateFileName ? ADMIN_TRANSLATION[policeTr].state : "current"}
+                  status={policeCertificateFileName ? ADMIN_TRANSLATION[policeTr].label : "Čeka kandidata"}
                 >
                   {(policeCertificateDataUrl || policeCertificateUrl) && (
                     <button
@@ -1172,7 +1245,7 @@ export default function CandidateApplicationModal({ candidate, onSave, onSaved, 
               </ul>
 
               {documentsRejectionReason && !documentsApproved && (
-                <p className="mt-4 text-[13px] text-red-700">Razlog za dopunu: {documentsRejectionReason}</p>
+                <p className="mt-4 text-[13px] text-red-700">Razlog vraćanja: {documentsRejectionReason}</p>
               )}
               <div className="mt-5 flex flex-wrap items-center gap-2 border-t border-line pt-4">
                 <Button
@@ -1181,13 +1254,15 @@ export default function CandidateApplicationModal({ candidate, onSave, onSaved, 
                   onClick={() => handleVerifyDocumentsAction(true)}
                   disabled={!documentsApproved && !translationsApproved}
                 >
-                  {documentsApproved ? "Odobren" : "Odobri dosije"}
+                  {documentsApproved ? "Dosije je odobren" : "Odobri dosije"}
                 </Button>
-                <Button size="sm" variant="outline" onClick={rejectDocs}>
-                  Vrati na dopunu
-                </Button>
+                {!documentsApproved && (
+                  <Button size="sm" variant="outline" onClick={rejectDocs}>
+                    Vrati kandidatu
+                  </Button>
+                )}
                 {!documentsApproved && !translationsApproved && (
-                  <span className="text-[13px] text-ink-3">Dosije se odobrava kad odobriš oba prevoda.</span>
+                  <span className="text-[13px] text-ink-3">Dosije se odobrava kad odobriš oba prevoda (ili uverenje „bez prevoda" ako je već na engleskom).</span>
                 )}
               </div>
             </Section>
@@ -1195,21 +1270,40 @@ export default function CandidateApplicationModal({ candidate, onSave, onSaved, 
             <Section title="Posao i viza">
               <ul className="divide-y divide-line">
                 <DocRow
-                  name="Job Offer"
-                  sub={selectedJobEmployer ? `${selectedJobTitle} — ${selectedJobEmployer}` : "Kandidat još nema posao"}
-                  state={offerSigned ? "done" : jobAccepted ? "wait" : selectedJobEmployer ? "current" : "locked"}
-                  status={
-                    offerSigned
-                      ? `Potpisan ${new Date(candidate.jobOfferSignedAt).toLocaleDateString("sr-RS")}`
-                      : jobAccepted
-                      ? "Čeka potpis kandidata"
-                      : "Kasnije"
+                  name="Potpisan Job Offer"
+                  sub={
+                    jobOffer.fileName ||
+                    (jobAccepted
+                      ? `Poslodavac nudi posao (${selectedJobTitle || "pozicija"} — ${selectedJobEmployer || "poslodavac"}). Kandidat okačuje potpisan Job Offer.`
+                      : selectedJobEmployer
+                      ? "Stiže kad poslodavac posle razgovora ponudi posao"
+                      : "Kandidat još nije izabrao posao")
                   }
+                  state={offerStatus.state}
+                  status={offerStatus.label}
                 >
-                  {offerSigned && candidate.jobOfferSignature && (
-                    <span className="font-serif text-[15px] italic text-ink-2">{candidate.jobOfferSignature}</span>
+                  {jobOffer.url && (
+                    <button type="button" onClick={openJobOffer} className={linkCls}>
+                      Otvori
+                    </button>
+                  )}
+                  {jobAccepted && (
+                    <Upload busy={uploadingDocType === "jobOffer"} onFile={(f) => handleAdminDocUpload(f, "jobOffer")} label={jobOffer.fileName ? "Zameni" : "Okači u ime kandidata"} />
+                  )}
+                  {jobOffer.state === "pending" && (
+                    <>
+                      <button type="button" onClick={() => handleVerifyJobOfferAction(true)} className={linkCls}>
+                        Odobri
+                      </button>
+                      <button type="button" onClick={rejectJobOffer} className={`${linkCls} text-red-700`}>
+                        Vrati
+                      </button>
+                    </>
                   )}
                 </DocRow>
+                {jobOffer.state === "rejected" && jobOffer.reason && (
+                  <li className="py-2 text-[13px] text-red-700">Razlog vraćanja: {jobOffer.reason}</li>
+                )}
                 <DocRow
                   name="DS-160 upitnik"
                   sub={ds160St.isComplete ? "Popunjen" : ds160St.isStarted ? `${ds160St.filledCount} od ${ds160St.totalCount} polja` : "Nije počet"}
@@ -1229,14 +1323,18 @@ export default function CandidateApplicationModal({ candidate, onSave, onSaved, 
                 <DocRow name="J-1 viza" sub="Posle razgovora u ambasadi" state={hasVisa ? "done" : status === "departure" ? "wait" : "locked"} status={hasVisa ? "Odobrena" : "Kasnije"} />
               </ul>
 
-              {ds160Entries.length > 0 && (
+              {ds160St.isStarted && (
                 <details className="mt-5 border-t border-line pt-4">
-                  <summary className="cursor-pointer text-sm font-medium text-ink">Odgovori iz DS-160 ({ds160Entries.length})</summary>
+                  <summary className="cursor-pointer text-sm font-medium text-ink">
+                    Odgovori iz DS-160 ({ds160St.filledCount} od {ds160St.totalCount} obaveznih)
+                  </summary>
                   <dl className="mt-3 grid gap-x-8 sm:grid-cols-2">
-                    {ds160Entries.map(([k, v]) => (
-                      <div key={k} className="flex flex-col gap-0.5 border-b border-line py-2">
-                        <dt className="text-xs text-ink-3">{k}</dt>
-                        <dd className="break-words text-sm text-ink">{String(v || "—")}</dd>
+                    {ds160Entries.map(([f, v]) => (
+                      <div key={f.key} className="flex flex-col gap-0.5 border-b border-line py-2">
+                        <dt className="text-xs text-ink-3">{f.label}</dt>
+                        <dd className={`break-words text-sm ${String(v || "").trim() ? "text-ink" : "text-red-700"}`}>
+                          {String(v || "").trim() || "Nije popunjeno"}
+                        </dd>
                       </div>
                     ))}
                   </dl>
@@ -1312,7 +1410,7 @@ export default function CandidateApplicationModal({ candidate, onSave, onSaved, 
                       },
                       {
                         num: 2,
-                        title: "II rata — uz Job Offer",
+                        title: "II rata — kad poslodavac ponudi posao",
                         eur: r2Amount,
                         paid: secondInstallmentPaid,
                         status: secondInstallmentStatus,
@@ -1343,10 +1441,10 @@ export default function CandidateApplicationModal({ candidate, onSave, onSaved, 
                           <p className="text-[15px] font-medium text-ink">{r.title}</p>
                           <p className="mt-0.5 text-[13px] text-ink-3">
                             {r.paid
-                              ? `Proknjiženo ${r.paidDate || ""}${r.rate ? ` · kurs ${Number(r.rate).toFixed(4)}` : ""}`
+                              ? `${PAYMENT.booked.label} ${r.paidDate || ""}${r.rate ? ` · kurs ${Number(r.rate).toFixed(4)}` : ""}`
                               : r.status === "pending"
-                              ? "Kandidat je prijavio uplatu"
-                              : "Nije plaćeno"}
+                              ? PAYMENT.reported.label
+                              : PAYMENT.open.label}
                           </p>
                         </div>
                       </div>
@@ -1591,24 +1689,8 @@ export default function CandidateApplicationModal({ candidate, onSave, onSaved, 
                 <Section
                   title="Izabrani posao"
                   aside={
-                    <StatusText
-                      state={
-                        jobAccepted ? "done" : jobApplicationStatus === "NO_SLOTS" || jobApplicationStatus === "REJECTED" ? "danger" : jobApplicationStatus ? "wait" : "current"
-                      }
-                    >
-                      {jobAccepted
-                        ? offerSigned
-                          ? "Job Offer potpisan"
-                          : "Prihvaćen"
-                        : jobApplicationStatus === "SCHEDULED"
-                        ? "Razgovor zakazan"
-                        : jobApplicationStatus === "APPLIED"
-                        ? "Čeka termin"
-                        : jobApplicationStatus === "NO_SLOTS"
-                        ? "Nema termina"
-                        : jobApplicationStatus === "REJECTED"
-                        ? "Odbijen"
-                        : "Nije izabran"}
+                    <StatusText state={(EMPLOYER[jobApplicationStatus] || EMPLOYER.NONE).state}>
+                      {(EMPLOYER[jobApplicationStatus] || EMPLOYER.NONE).label}
                     </StatusText>
                   }
                 >
@@ -1644,13 +1726,13 @@ export default function CandidateApplicationModal({ candidate, onSave, onSaved, 
                     if (!catalogJob)
                       return (
                         <p className="mt-2 text-[13px] text-amber-700">
-                          Job Offer se pravi iz baze poslova. Izaberi posao iz liste da bi kandidat mogao da potpiše ponudu.
+                          Ovaj posao nije iz baze poslova, pa se podaci poslodavca neće sami upisati u DS-160.
                         </p>
                       );
                     const missing = required.filter((k) => !String(catalogJob[k] || "").trim());
                     return missing.length ? (
                       <p className="mt-2 text-[13px] text-amber-700">
-                        Job Offer za ovaj posao nije kompletan. Dopuni podatke ponude u „Poslovi" pre nego što označiš da je kandidat izabran.
+                        Podaci poslodavca za DS-160 nisu kompletni. Dopuni ih u „Poslovi".
                       </p>
                     ) : null;
                   })()}
@@ -1670,23 +1752,16 @@ export default function CandidateApplicationModal({ candidate, onSave, onSaved, 
                     <Field label="Smeštaj">
                       <input value={selectedJobHousing} onChange={(e) => setSelectedJobHousing(e.target.value)} className={FIELD_CLS} />
                     </Field>
-                    <div className="flex items-end pb-2.5">
-                      <Toggle
-                        checked={hasJob}
-                        onChange={(v) => {
-                          setHasJob(v);
-                          if (v) setJobApplicationStatus("ACCEPTED");
-                        }}
-                      >
-                        Job Offer potvrđen
-                      </Toggle>
-                    </div>
                   </div>
-                  {offerSigned && (
-                    <p className="mt-4 border-t border-line pt-3 text-[13px] text-ink-3">
-                      Kandidat je potpisao Job Offer {new Date(candidate.jobOfferSignedAt).toLocaleDateString("sr-RS")}
-                      {candidate.jobOfferSignature ? ` kao „${candidate.jobOfferSignature}“` : ""}.
-                    </p>
+                  {jobAccepted && (
+                    <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-line pt-3">
+                      <p className="text-[13px] text-ink-3">
+                        Potpisan Job Offer: <StatusText state={offerStatus.state}>{offerStatus.label}</StatusText>
+                      </p>
+                      <button type="button" onClick={() => go("docs")} className={linkCls}>
+                        Otvori u Dokumentima
+                      </button>
+                    </div>
                   )}
                 </Section>
 
@@ -1720,9 +1795,8 @@ export default function CandidateApplicationModal({ candidate, onSave, onSaved, 
                           return;
                         }
                         setJobApplicationStatus("SCHEDULED");
-                        setHasJob(false);
                         saveJob(
-                          { jobApplicationStatus: "SCHEDULED", interviewScheduledAt, interviewType, interviewLink, interviewNote, hasJob: false },
+                          { jobApplicationStatus: "SCHEDULED", interviewScheduledAt, interviewType, interviewLink, interviewNote },
                           "Razgovor je zakazan. Kandidat ga vidi u svom nalogu."
                         );
                       }}
@@ -1734,11 +1808,13 @@ export default function CandidateApplicationModal({ candidate, onSave, onSaved, 
                       variant="dark"
                       onClick={() => {
                         setJobApplicationStatus("ACCEPTED");
-                        setHasJob(true);
-                        saveJob({ jobApplicationStatus: "ACCEPTED", hasJob: true }, "Poslodavac je prihvatio kandidata. Kandidat sada potpisuje Job Offer.");
+                        saveJob(
+                          { jobApplicationStatus: "ACCEPTED" },
+                          "Upisano: poslodavac nudi posao. Kandidat dobija mejl i okačuje potpisan Job Offer, koji onda stiže tebi u Dokumenta."
+                        );
                       }}
                     >
-                      Prihvaćen
+                      Poslodavac nudi posao
                     </Button>
                     <Button
                       size="sm"
@@ -1746,12 +1822,11 @@ export default function CandidateApplicationModal({ candidate, onSave, onSaved, 
                       onClick={() => {
                         const note = interviewNote || "Poslodavac trenutno nema slobodnih termina. Izaberi drugi posao iz baze.";
                         setJobApplicationStatus("NO_SLOTS");
-                        setHasJob(false);
                         if (!interviewNote) setInterviewNote(note);
-                        saveJob({ jobApplicationStatus: "NO_SLOTS", interviewNote: note, hasJob: false }, "Evidentirano: nema termina. Kandidat je obavešten.");
+                        saveJob({ jobApplicationStatus: "NO_SLOTS", interviewNote: note }, "Upisano: poslodavac nema mesta. Kandidat bira drugi posao.");
                       }}
                     >
-                      Nema termina
+                      Poslodavac nema mesta
                     </Button>
                     <Button
                       size="sm"
@@ -1759,12 +1834,11 @@ export default function CandidateApplicationModal({ candidate, onSave, onSaved, 
                       onClick={() => {
                         const note = interviewNote || "Poslodavac nije prihvatio kandidata. Izaberi novi posao iz baze.";
                         setJobApplicationStatus("REJECTED");
-                        setHasJob(false);
                         if (!interviewNote) setInterviewNote(note);
-                        saveJob({ jobApplicationStatus: "REJECTED", interviewNote: note, hasJob: false }, "Evidentirano: poslodavac je odbio kandidata. Izbor posla je ponovo otvoren.");
+                        saveJob({ jobApplicationStatus: "REJECTED", interviewNote: note }, "Upisano: poslodavac je odbio kandidata. Izbor posla je ponovo otvoren.");
                       }}
                     >
-                      Odbijen
+                      Poslodavac odbio
                     </Button>
                   </div>
                 </Section>
@@ -1841,10 +1915,20 @@ export default function CandidateApplicationModal({ candidate, onSave, onSaved, 
                 </Field>
               </div>
               <p className="mt-4 text-[13px] text-ink-3">
-                DS-160: {ds160St.isComplete ? "popunjen" : ds160St.isStarted ? `${ds160St.filledCount} od ${ds160St.totalCount} polja` : "nije počet"} ·{" "}
+                DS-160: {ds160St.isComplete ? "popunjen" : ds160St.isStarted ? `${ds160St.filledCount} od ${ds160St.totalCount} obaveznih polja` : "nije počet"} ·{" "}
                 <button type="button" onClick={() => go("docs")} className={linkCls}>
                   odgovori u Dokumentima
                 </button>
+              </p>
+              <p className="mt-1.5 text-[13px] text-ink-3">
+                Vizna taksa (185 $, plaća se Ambasadi):{" "}
+                {candidate.visaFeeReportedAt ? (
+                  <StatusText state="done">
+                    kandidat je javio da je platio {new Date(candidate.visaFeeReportedAt).toLocaleDateString("sr-RS")}
+                  </StatusText>
+                ) : (
+                  <StatusText state="current">kandidat još nije javio uplatu</StatusText>
+                )}
               </p>
             </Section>
 
@@ -2191,6 +2275,7 @@ export default function CandidateApplicationModal({ candidate, onSave, onSaved, 
                 onClick={() => {
                   const reasonText = rejectionModal.reason.trim() || "Dokument nije ispravan. Pošalji ga ponovo.";
                   if (rejectionModal.type === "contract") handleVerifyContractAction(false, reasonText);
+                  else if (rejectionModal.type === "jobOffer") handleVerifyJobOfferAction(false, reasonText);
                   else handleVerifyDocumentsAction(false, reasonText);
                   setRejectionModal(null);
                 }}
@@ -2237,6 +2322,29 @@ function Section({ title, hint, aside, children, className = "" }) {
         </div>
       )}
       {children}
+    </section>
+  );
+}
+
+// Šta znače statusi (isti rečnik u celom adminu, vidi reviewStatus.js).
+function StatusLegend() {
+  return (
+    <section className={`${cardCls} px-5 py-4`} aria-label="Šta znače statusi">
+      <ul className="flex flex-wrap gap-x-6 gap-y-2 text-[13px] text-ink-3">
+        {[
+          [REVIEW.review, "kandidat je poslao, red je na tebi"],
+          [REVIEW.approved, "ti si potvrdio"],
+          [REVIEW.returned, "čeka ispravku od kandidata"],
+          [REVIEW.todo, "kandidat još nije poslao"],
+        ].map(([st, desc]) => (
+          <li key={st.label} className="flex items-center gap-2">
+            <TaskIcon state={st.state} className="h-4 w-4" />
+            <span>
+              <StatusText state={st.state}>{st.label}</StatusText> — {desc}
+            </span>
+          </li>
+        ))}
+      </ul>
     </section>
   );
 }

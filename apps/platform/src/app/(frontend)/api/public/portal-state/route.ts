@@ -22,6 +22,9 @@ import {
   sanitizeCandidateUpdate,
 } from '@/modules/portal-sync/access.ts'
 import { applyContractVerification, ContractVerificationError } from '@/modules/portal-sync/contractVerification.ts'
+import { DossierError, reviewDossier, submitDossier } from '@/modules/portal-sync/dossierReview.ts'
+import { applyJobOfferVerification, JobOfferError } from '@/modules/portal-sync/jobOfferVerification.ts'
+import { sanitizeDs160Answers } from '@/modules/portal-sync/ds160Answers.ts'
 import { PortalJobError, selectPortalJob } from '@/modules/portal-sync/portalJobActions.ts'
 import { normalizeJobInput, offeredJobsFor, publicJob } from '@/modules/portal-sync/portalJobs.ts'
 import { notifyAgencyChanges, notifyCandidateChanges, sendInvitationEmail } from '@/modules/portal-sync/portalNotifications.ts'
@@ -74,7 +77,7 @@ export async function GET() {
 }
 
 // Ugovor se potpisuje svojeručno; potpisan sken ide preko /api/public/documents/upload (docType contract).
-const CANDIDATE_ACTIONS = new Set(['saveCandidate', 'saveDs160', 'selectJob'])
+const CANDIDATE_ACTIONS = new Set(['saveCandidate', 'saveDs160', 'selectJob', 'submitDossier', 'reportVisaFee'])
 
 export async function POST(request: Request) {
   if (!isSameOriginRequest(request)) return json({ message: 'Zahtev nije dozvoljen.' }, 403)
@@ -124,9 +127,35 @@ export async function POST(request: Request) {
           throw error
         }
       }
+      // Slanje dosijea na pregled: server proverava da je sve tu i obaveštava agenciju.
+      if (action === 'submitDossier') {
+        try {
+          const next = submitDossier(existing as unknown as Record<string, unknown>)
+          const candidate = await savePortalCandidate(next as never)
+          notifyAgencyChanges(existing as unknown as Record<string, unknown>, candidate as unknown as Record<string, unknown>)
+          return json({ candidate })
+        } catch (error) {
+          if (error instanceof DossierError) return json({ message: error.message }, error.status)
+          throw error
+        }
+      }
+      // Viznu taksu kandidat plaća Ambasadi SAD; ovde samo javlja da je platio (agencija to vidi u dosijeu).
+      if (action === 'reportVisaFee') {
+        const status = String(existing.status || '')
+        if (status !== 'departure' && status !== 'ready') {
+          return json({ message: 'Viznu taksu plaćaš u Koraku 3, pre razgovora u ambasadi.' }, 409)
+        }
+        const candidate = await savePortalCandidate({
+          ...(existing as object),
+          visaFeeReportedAt: data.paid === false ? null : new Date().toISOString(),
+        } as never)
+        return json({ candidate })
+      }
       if (action === 'saveDs160') {
-        const answers = (data.ds160 || {}) as Record<string, string>
+        const answers = sanitizeDs160Answers(data.ds160)
+        if (Object.keys(answers).length === 0) return json({ message: 'Upitnik je prazan. Popuni polja pa sačuvaj.' }, 400)
         const candidate = await savePortalCandidateDs160(existing.id, answers)
+        if (!candidate) return json({ message: 'Profil nije pronađen.' }, 404)
         return json({ candidate, success: true })
       }
     }
@@ -187,6 +216,26 @@ export async function POST(request: Request) {
       })
     }
 
+    // Odobravanje ili vraćanje dosijea: nad trenutnim zapisom sa servera, uz obaveštenje kandidatu.
+    if (action === 'verifyDocuments') {
+      const before = await getPortalState()
+      const email = String(data.email || '').toLowerCase()
+      const existing = before.candidates.find((c) => String(c.email || '').toLowerCase() === email)
+      if (!existing) return json({ message: 'Kandidat nije pronađen.' }, 404)
+      try {
+        const next = reviewDossier(existing as unknown as Record<string, unknown>, {
+          approved: data.approved === true,
+          reason: typeof data.reason === 'string' ? data.reason : '',
+        })
+        const candidate = await savePortalCandidate(next as never)
+        notifyCandidateChanges(existing as unknown as Record<string, unknown>, candidate as unknown as Record<string, unknown>)
+        return json({ candidate })
+      } catch (error) {
+        if (error instanceof DossierError) return json({ message: error.message }, error.status)
+        throw error
+      }
+    }
+
     // Overa ili vraćanje potpisanog ugovora: nad trenutnim zapisom sa servera, uz obaveštenje kandidatu.
     if (action === 'verifyContract') {
       const before = await getPortalState()
@@ -203,6 +252,25 @@ export async function POST(request: Request) {
         return json({ candidate })
       } catch (error) {
         if (error instanceof ContractVerificationError) return json({ message: error.message }, error.status)
+        throw error
+      }
+    }
+
+    if (action === 'verifyJobOffer') {
+      const before = await getPortalState()
+      const email = String(data.email || '').toLowerCase()
+      const existing = before.candidates.find((c) => String(c.email || '').toLowerCase() === email)
+      if (!existing) return json({ message: 'Kandidat nije pronađen.' }, 404)
+      try {
+        const next = applyJobOfferVerification(existing as unknown as Record<string, unknown>, {
+          approved: data.approved === true,
+          reason: typeof data.reason === 'string' ? data.reason : '',
+        })
+        const candidate = await savePortalCandidate(next as never)
+        notifyCandidateChanges(existing as unknown as Record<string, unknown>, candidate as unknown as Record<string, unknown>)
+        return json({ candidate })
+      } catch (error) {
+        if (error instanceof JobOfferError) return json({ message: error.message }, error.status)
         throw error
       }
     }
@@ -266,7 +334,7 @@ export async function POST(request: Request) {
 
     if (action === 'saveDs160') {
       const targetId = (data.candidateId || data.email || '') as string | number
-      const answers = (data.ds160 || {}) as Record<string, string>
+      const answers = sanitizeDs160Answers(data.ds160)
       const candidate = await savePortalCandidateDs160(targetId, answers)
       return json({ candidate, success: true })
     }

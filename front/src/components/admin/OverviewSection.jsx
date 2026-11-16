@@ -6,7 +6,7 @@ import { candidateQueue, isPreApplication, STAGE_OF, STAGES } from "./queue";
 import { PageHeader, Card } from "./ui";
 import { TaskIcon } from "../dashboard/ui";
 
-const GROUP_ORDER = ["Ugovori za overu", "Uplate za knjiženje", "Dosijei za pregled", "Poslovi", "Viza", "Nove prijave"];
+const GROUP_ORDER = ["Dokumenta za proveru", "Uplate za knjiženje", "Poslovi", "Viza", "Nove prijave"];
 
 export default function OverviewSection({ onOpenCandidate, onGoTo }) {
   const [list, setList] = useState(getCandidates);

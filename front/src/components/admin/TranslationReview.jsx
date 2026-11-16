@@ -150,9 +150,18 @@ export default function TranslationReview({ candidate, doc, onCandidate, showToa
       "Prevod je vraćen kandidatu sa obrazloženjem."
     );
 
+  const waive = () =>
+    run("waive", () => reviewTranslation({ email, doc, action: "waive" }), "Uverenje je odobreno bez prevoda.");
+  const requireTranslation = () =>
+    run(
+      "require",
+      () => reviewTranslation({ email, doc, action: "requireTranslation" }),
+      "Oznaka je skinuta: za ovo uverenje treba prevod."
+    );
+
   const ai = t?.source === "ai";
   const tone =
-    state === "approved" ? "text-emerald-700" : state === "rejected" ? "text-red-700" : state === "needed" ? "text-ink-3" : "text-amber-700";
+    state === "approved" || state === "waived" ? "text-emerald-700" : state === "rejected" ? "text-red-700" : state === "needed" ? "text-ink-3" : "text-amber-700";
 
   return (
     <div className="basis-full space-y-3 rounded-xl bg-surface/60 p-3.5 sm:p-4">
@@ -168,6 +177,31 @@ export default function TranslationReview({ candidate, doc, onCandidate, showToa
 
       {error && <p className="text-[13px] text-red-700">{error}</p>}
 
+      {/* Uverenje već na engleskom (ili dvojezično): odobrava se bez prevoda. */}
+      {state === "waived" && (
+        <div className="flex flex-wrap items-center gap-3">
+          <p className="text-[13px] text-ink-2">Uverenje je odobreno bez prevoda.</p>
+          <button type="button" className={linkCls} onClick={requireTranslation} disabled={Boolean(busy)}>
+            {busy === "require" ? "Menjam…" : "Ipak traži prevod"}
+          </button>
+        </div>
+      )}
+      {state === "declared" && (
+        <p className="text-[13px] text-ink-2">Kandidat kaže da je uverenje već na engleskom. Proveri original, pa odobri bez prevoda ili traži prevod.</p>
+      )}
+      {(state === "needed" || state === "declared" || state === "review" || state === "confirmed" || state === "rejected") && (
+        <div className="flex flex-wrap items-center gap-3">
+          <Button size="sm" variant={state === "declared" ? "dark" : "outline"} onClick={waive} disabled={Boolean(busy)}>
+            {busy === "waive" ? "Odobravam…" : "Odobri bez prevoda"}
+          </Button>
+          {state === "declared" && (
+            <button type="button" className={linkCls} onClick={requireTranslation} disabled={Boolean(busy)}>
+              {busy === "require" ? "Menjam…" : "Traži prevod"}
+            </button>
+          )}
+        </div>
+      )}
+
       {state === "needed" && (
         <div className="flex flex-wrap items-center gap-3">
           <p className="text-[13px] text-ink-3">Kandidat još nije napravio prevod.</p>
@@ -177,7 +211,7 @@ export default function TranslationReview({ candidate, doc, onCandidate, showToa
         </div>
       )}
 
-      {t && (
+      {t && state !== "waived" && (
         <>
           {t.candidateNote && (
             <p className="text-[13px] text-ink-2">

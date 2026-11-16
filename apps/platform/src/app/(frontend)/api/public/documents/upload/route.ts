@@ -17,6 +17,7 @@ import {
   isRemovableDocument,
   removeCandidateDocument,
 } from '@/modules/portal-sync/portalDocumentRemoval.ts'
+import { applyJobOfferUpload, JobOfferError } from '@/modules/portal-sync/jobOfferVerification.ts'
 import { notifyAgencyChanges } from '@/modules/portal-sync/portalNotifications.ts'
 import { attachUploadedTranslation, clearTranslation, PortalTranslationError } from '@/modules/portal-sync/portalTranslations.ts'
 import { isSameOriginRequest } from '@/modules/security/sameOrigin.ts'
@@ -147,6 +148,16 @@ export async function POST(request: Request) {
       return json({ message: 'Dosije je već odobren. Za izmenu dokumenta javi se agenciji.', success: false }, 409)
     }
 
+    // Potpisan Job Offer: proveri pre čuvanja fajla da li kandidat sme da ga okači.
+    if (docType === 'jobOffer') {
+      try {
+        applyJobOfferUpload(candidate as never, { fileName: file.name, fileUrl: '' }, { byAgency: actor.kind === 'admin' })
+      } catch (error) {
+        if (error instanceof JobOfferError) return json({ message: error.message, success: false }, error.status)
+        throw error
+      }
+    }
+
     // Fajl se čuva šifrovano u bazi (portal-documents), ne na disku kontejnera.
     const rawBytes = Buffer.from(await file.arrayBuffer())
     if (rawBytes.length > MAX_PORTAL_DOCUMENT_BYTES) {
@@ -162,6 +173,8 @@ export async function POST(request: Request) {
         ? 'facultyCertUrl'
         : docType === 'signedContract' || docType === 'contract'
           ? 'signedContractUrl'
+          : docType === 'jobOffer'
+            ? 'jobOfferUrl'
           : docType === 'policeCert'
             ? 'policeCertificateUrl'
             : docType === 'passport'
@@ -249,6 +262,23 @@ export async function POST(request: Request) {
         fileUrl,
         previewDataUrl,
         message: 'Potpisan ugovor je okačen. Uplata ti je otvorena, a agencija proverava ugovor.',
+        success: true,
+      })
+    }
+
+    if (docType === 'jobOffer') {
+      const updated = applyJobOfferUpload(
+        candidate as never,
+        { fileName: file.name, fileUrl },
+        { byAgency: actor.kind === 'admin' },
+      )
+      await savePortalCandidate(updated as never)
+      notifyAgencyChanges(candidate as unknown as Record<string, unknown>, updated)
+      return json({
+        candidate: updated,
+        fileName: file.name,
+        fileUrl,
+        message: 'Potpisan Job Offer je okačen. Agencija ga proverava uz ostala dokumenta.',
         success: true,
       })
     }

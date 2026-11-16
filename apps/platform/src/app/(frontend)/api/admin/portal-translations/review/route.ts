@@ -1,12 +1,13 @@
 import { z } from 'zod'
 
 import { resolvePortalActor } from '@/modules/portal-sync/access.ts'
-import { PortalTranslationError, reviewTranslation } from '@/modules/portal-sync/portalTranslations.ts'
+import { PortalTranslationError, reviewTranslation, setNoTranslation } from '@/modules/portal-sync/portalTranslations.ts'
 import { isSameOriginRequest } from '@/modules/security/sameOrigin.ts'
 
 const schema = z
   .object({
-    action: z.enum(['approve', 'reject', 'save']),
+    // waive: uverenje odobreno bez prevoda; requireTranslation: ipak treba prevod.
+    action: z.enum(['approve', 'reject', 'save', 'waive', 'requireTranslation']),
     data: z.record(z.string(), z.unknown()).optional(),
     doc: z.enum(['faculty', 'police']),
     email: z.string().email().max(254),
@@ -26,11 +27,21 @@ export async function POST(request: Request) {
   const parsed = schema.safeParse(await request.json().catch(() => null))
   if (!parsed.success) return json({ message: 'Neispravan zahtev.' }, 400)
   try {
-    const candidate = await reviewTranslation({
-      ...parsed.data,
-      email: parsed.data.email.toLowerCase(),
-      reviewer: `admin:${actor.id}`,
-    })
+    const { action } = parsed.data
+    const candidate =
+      action === 'waive' || action === 'requireTranslation'
+        ? await setNoTranslation({
+            by: 'agency',
+            doc: parsed.data.doc,
+            email: parsed.data.email.toLowerCase(),
+            value: action === 'waive' ? 'approved' : '',
+          })
+        : await reviewTranslation({
+            ...parsed.data,
+            action,
+            email: parsed.data.email.toLowerCase(),
+            reviewer: `admin:${actor.id}`,
+          })
     return json({ candidate })
   } catch (error) {
     if (error instanceof PortalTranslationError) return json({ message: error.message }, error.status)

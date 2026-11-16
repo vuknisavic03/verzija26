@@ -48,7 +48,7 @@ function TimelineIcon({ className = "h-4 w-4" }) {
 }
 
 const SECTIONS = [
-  { id: "put", label: "Moj put" },
+  { id: "put", label: "Aplikacija" },
   { id: "dokumenta", label: "Dokumenta" },
   { id: "uplate", label: "Uplate" },
   { id: "podaci", label: "Moji podaci", short: "Podaci" },

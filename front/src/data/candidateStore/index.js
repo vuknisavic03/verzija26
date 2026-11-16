@@ -14,3 +14,5 @@ export * from "./contract.js";
 export * from "./payments.js";
 export * from "./jobs.js";
 export * from "./translations.js";
+export * from "./jobOffer.js";
+export * from "./ds160.js";

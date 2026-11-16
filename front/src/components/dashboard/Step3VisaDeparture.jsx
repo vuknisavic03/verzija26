@@ -2,7 +2,7 @@
 // Korak 3: DS-2019 → DS-160 → vizna taksa → Ambasada → III rata / PKZ → orijentacija i let.
 import { Button } from "../ui";
 import { getDs160Status } from "../../data/candidateStore";
-import { StepShell, TaskList, Actions, LinkButton, Notice, StatusPill } from "./ui";
+import { StepShell, StageTasks, Actions, LinkButton, Notice, StatusPill } from "./ui";
 
 export function isPkz(candidate) {
   return Boolean(
@@ -29,8 +29,14 @@ export function buildVisaTasks(ctx) {
     handleReportThirdInstallment,
     setShowDs160Modal,
     openPaymentSlip,
+    handleReportVisaFee,
     stepLocked,
   } = ctx;
+  const ds2019Issued = candidate.ds2019Status === "ISSUED" || isReady;
+  const visaFeePaid = Boolean(candidate.visaFeeReportedAt) || isReady;
+  const embassyAt = candidate.embassyInterviewDate
+    ? new Date(candidate.embassyInterviewDate).toLocaleString("sr-Latn-RS", { day: "numeric", month: "long", hour: "2-digit", minute: "2-digit" })
+    : "";
   const isFullPaid = candidate.paymentMethod === "now" || candidate.isFullPaymentPaid;
   const pkz = isPkz(candidate);
   const ds = getDs160Status(candidate.ds160);
@@ -42,14 +48,17 @@ export function buildVisaTasks(ctx) {
       id: "ds2019",
       waitText: "Sponzor izdaje DS-2019",
       title: "DS-2019 i SEVIS",
-      state: isDeparture ? "done" : lock("wait"),
-      status: isDeparture ? "Izdat" : stepLocked ? "Posle Koraka 2" : "Radimo mi",
-      desc: isDeparture
-        ? null
-        : "Ovo radimo mi sa sponzorom.",
+      state: ds2019Issued ? "done" : lock("wait"),
+      status: ds2019Issued ? "Izdat" : stepLocked ? "Posle Koraka 2" : "Sponzor ga izdaje",
+      desc: ds2019Issued
+        ? candidate.ds2019Number
+          ? `SEVIS broj: ${candidate.ds2019Number}`
+          : null
+        : "Ovo radimo mi sa sponzorom. Javljamo ti kad stigne.",
     },
     {
       id: "ds160",
+      area: "docs",
       title: "Popuni DS-160 upitnik",
       state: ds.isComplete ? "done" : lock("current"),
       status: ds.isComplete ? "Popunjen" : ds.isStarted ? `${ds.filledCount} od ${ds.totalCount} polja` : "Nije počet",
@@ -69,22 +78,41 @@ export function buildVisaTasks(ctx) {
     },
     {
       id: "visafee",
+      area: "pay",
       title: "Uplati viznu taksu — 185 $",
-      state: isReady ? "done" : lock("info"),
-      status: isReady ? "Plaćeno" : stepLocked ? "Posle Koraka 2" : "Pre termina u ambasadi",
-      desc: isReady ? null : "Pre razgovora u ambasadi — potvrdu ponesi sa sobom.",
-      render: () =>
+      state: visaFeePaid ? "done" : lock(isDeparture ? "current" : "locked"),
+      status: visaFeePaid
+        ? candidate.visaFeeReportedAt
+          ? `Plaćeno ${new Date(candidate.visaFeeReportedAt).toLocaleDateString("sr-Latn-RS")}`
+          : "Plaćeno"
+        : stepLocked
+        ? "Posle Koraka 2"
+        : "Pre termina u ambasadi",
+      desc: visaFeePaid ? null : "Plaća se Ambasadi SAD, pre razgovora. Potvrdu o uplati ponesi na razgovor.",
+      render: (isNext) =>
         isReady ? null : (
-          <a href="/documents/Uplatnica_viziranje.docx" download="Uplatnica_viziranje.docx" className={linkCls}>
-            Preuzmi uplatnicu za viznu taksu
-          </a>
+          <Actions>
+            <a href="/documents/Uplatnica_viziranje.docx" download="Uplatnica_viziranje.docx" className={linkCls}>
+              Uplatnica za viznu taksu
+            </a>
+            {candidate.visaFeeReportedAt ? (
+              <LinkButton onClick={() => handleReportVisaFee?.(false)}>Ipak nisam platio</LinkButton>
+            ) : (
+              isDeparture && (
+                <Button variant={isNext ? "primary" : "dark"} size="sm" onClick={() => handleReportVisaFee?.(true)}>
+                  Platio sam viznu taksu
+                </Button>
+              )
+            )}
+          </Actions>
         ),
     },
     {
       id: "embassy",
       title: "Razgovor u Ambasadi SAD",
-      state: isReady ? "done" : status === "departure" ? "current" : lock("locked"),
-      status: isReady ? "Viza odobrena" : status === "departure" ? "Termin u pripremi" : "Posle DS-160",
+      waitText: "Zakazujemo termin u ambasadi",
+      state: isReady ? "done" : embassyAt ? "current" : status === "departure" ? "wait" : lock("locked"),
+      status: isReady ? "Viza odobrena" : embassyAt ? embassyAt : status === "departure" ? "Termin zakazujemo mi" : "Posle DS-160",
       desc: isReady
         ? null
         : "Kneza Miloša 50, Beograd. Pre toga radimo probni razgovor.",
@@ -99,6 +127,7 @@ export function buildVisaTasks(ctx) {
     isFullPaid
       ? {
           id: "payment3",
+          area: "pay",
           title: "Program je plaćen u celosti",
           state: "done",
           status: "Bez III rate",
@@ -107,6 +136,7 @@ export function buildVisaTasks(ctx) {
       : pkz
       ? {
           id: "payment3",
+          area: "pay",
           title: `III rata — ${rate3} USD iz plate u SAD`,
           state: "info",
           status: "PKZ model",
@@ -114,6 +144,7 @@ export function buildVisaTasks(ctx) {
         }
       : {
           id: "payment3",
+          area: "pay",
           waitText: "Proveravamo uplatu III rate",
           title: `Uplati III ratu — ${rate3} USD`,
           state: isThirdInstallmentPaid ? "done" : isThirdInstallmentPending ? "wait" : lock("current"),
@@ -173,7 +204,7 @@ export default function Step3VisaDeparture({ ctx, quiet, compact }) {
           Pasoš sa vizom te čeka u agenciji. Ostala je još orijentacija pred put.
         </Notice>
       )}
-      <TaskList tasks={tasks} quiet={quiet || stepLocked} />
+      <StageTasks tasks={tasks} quiet={quiet || stepLocked} goTo={ctx.goTo} />
     </StepShell>
   );
 }

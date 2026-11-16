@@ -159,7 +159,8 @@ describe('AI translation call', () => {
     }) as unknown as typeof fetch
     const result = await translateWithAi({ bytes: Buffer.from('%PDF-1.4 test'), doc: 'police', fetchImpl, mimeType: 'application/pdf' })
     expect(result.data.personName).toBe('Sara Petrović')
-    expect(sent.tool_choice).toEqual({ name: 'record_translation', type: 'tool' })
+    expect(sent.tool_choice).toEqual({ type: 'auto' })
+    expect(JSON.stringify(sent.messages)).toContain('record_translation tool')
     const content = (sent.messages as Array<{ content: Array<{ source?: { media_type: string }; type: string }> }>)[0]!.content
     expect(content[0]!.type).toBe('document')
     expect(content[0]!.source!.media_type).toBe('application/pdf')

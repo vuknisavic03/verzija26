@@ -2,7 +2,7 @@
 // Registracija: ugovor → prva uplata. Program, popusti i uplatnice žive u sekcijama "Uplate" i "Moji podaci".
 import { Button } from "../ui";
 import { UploadIcon } from "./icons";
-import { StepShell, TaskList, Actions, LinkButton, FileLine, StatusPill, RemoveFileButton } from "./ui";
+import { StepShell, StageTasks, Actions, LinkButton, FileLine, StatusPill, RemoveFileButton } from "./ui";
 import { downloadContractPdf, downloadResponsibilityStatementPdf } from "../../data/candidateStore";
 
 export function firstPaymentAmount(candidate) {
@@ -34,6 +34,7 @@ export function buildRegistrationTasks(ctx) {
   return [
     {
       id: "contract",
+      area: "docs",
       waitText: "Ugovor je na overi kod pravnog tima",
       title: "Potpiši i okači ugovor",
       state: isContractApproved ? "done" : contractRejected ? "danger" : isContractPending ? "wait" : "current",
@@ -82,6 +83,7 @@ export function buildRegistrationTasks(ctx) {
     },
     {
       id: "payment1",
+      area: "pay",
       waitText: "Proveravamo tvoju uplatu",
       title: isFull ? `Uplati program — ${amount} USD` : `Uplati I ratu — ${amount} USD`,
       state: isFirstInstallmentPaid ? "done" : isFirstInstallmentPending ? "wait" : !hasSignedContract ? "locked" : "current",
@@ -136,7 +138,7 @@ export default function Step0Registration({ ctx, quiet, compact }) {
         </StatusPill>
       }
     >
-      <TaskList tasks={tasks} quiet={quiet} />
+      <StageTasks tasks={tasks} quiet={quiet} goTo={ctx.goTo} />
     </StepShell>
   );
 }

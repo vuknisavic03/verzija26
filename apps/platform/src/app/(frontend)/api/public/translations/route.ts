@@ -29,7 +29,7 @@ export async function POST(request: Request) {
   if (!email) return json({ message: 'Izaberi kandidata.' }, 400)
 
   try {
-    const candidate = await createAiTranslation({ doc: parsed.data.doc, email })
+    const candidate = await createAiTranslation({ byAgency: actor.kind === 'admin', doc: parsed.data.doc, email })
     return json({ candidate }, 201)
   } catch (error) {
     if (error instanceof PortalTranslationError) return json({ message: error.message }, error.status)

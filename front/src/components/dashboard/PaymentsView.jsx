@@ -44,6 +44,8 @@ export default function PaymentsView({ ctx }) {
     isThirdInstallmentPaid,
     isThirdInstallmentPending,
     isReady,
+    isDeparture,
+    handleReportVisaFee,
     handlePaymentSlipClick,
     handleReportFirstInstallment,
     handleReportSecondInstallment,
@@ -139,7 +141,7 @@ export default function PaymentsView({ ctx }) {
             <PaymentRow
               id="pay-rate2"
               title="II rata"
-              note="Kad potvrdiš posao (Job Offer)"
+              note="Kad ti poslodavac ponudi posao"
               amount={formatUsd(rate2)}
               {...st(isSecondInstallmentPaid, isSecondInstallmentPending, hasConfirmedJob)}
             >
@@ -196,18 +198,34 @@ export default function PaymentsView({ ctx }) {
           <PaymentRow
             id="pay-visa"
             title="Vizna taksa"
-            note="Plaća se Ambasadi SAD, pre razgovora"
+            note="Plaća se Ambasadi SAD, pre razgovora. Potvrdu ponesi na razgovor."
             amount={formatUsd(185)}
-            {...(isReady ? { tone: "done", statusLabel: "Plaćeno" } : { tone: "neutral", statusLabel: "U Koraku 3" })}
+            {...(candidate.visaFeeReportedAt || isReady
+              ? {
+                  tone: "done",
+                  statusLabel: candidate.visaFeeReportedAt
+                    ? `Plaćeno ${new Date(candidate.visaFeeReportedAt).toLocaleDateString("sr-Latn-RS")}`
+                    : "Plaćeno",
+                }
+              : isDeparture
+              ? { tone: "neutral", statusLabel: "Za uplatu" }
+              : { tone: "neutral", statusLabel: "Kasnije" })}
           >
             {!isReady && (
-              <a
-                href="/documents/Uplatnica_viziranje.docx"
-                download="Uplatnica_viziranje.docx"
-                className="text-[13px] font-medium text-ink underline decoration-line-strong underline-offset-4 hover:decoration-ink"
-              >
-                Uplatnica za viznu taksu
-              </a>
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+                <a
+                  href="/documents/Uplatnica_viziranje.docx"
+                  download="Uplatnica_viziranje.docx"
+                  className="text-[13px] font-medium text-ink underline decoration-line-strong underline-offset-4 hover:decoration-ink"
+                >
+                  Uplatnica za viznu taksu
+                </a>
+                {candidate.visaFeeReportedAt ? (
+                  <LinkButton onClick={() => handleReportVisaFee?.(false)}>Ipak nisam platio</LinkButton>
+                ) : (
+                  isDeparture && <LinkButton onClick={() => handleReportVisaFee?.(true)}>Platio sam viznu taksu</LinkButton>
+                )}
+              </div>
             )}
           </PaymentRow>
         </ul>

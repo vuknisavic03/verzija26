@@ -34,6 +34,14 @@ describe('portal notification rules', () => {
     const uploaded = { signedContractUploadedAt: '2026-11-16T12:00:00.000Z' }
     expect(agencyNoticesFor({}, uploaded).map((n) => n.kind)).toEqual(['contractUploaded'])
     expect(agencyNoticesFor(uploaded, uploaded)).toEqual([])
+    const offer = { jobOfferUploadedAt: '2026-11-16T10:00:00Z' }
+    expect(agencyNoticesFor({}, offer).map((n) => n.kind)).toEqual(['jobOfferUploaded'])
+    expect(
+      candidateNoticesFor(
+        { jobOfferVerificationStatus: 'pending' },
+        { jobOfferRejectionReason: 'Nema potpisa', jobOfferVerificationStatus: 'rejected' },
+      ),
+    ).toEqual([{ details: { reason: 'Nema potpisa' }, kind: 'jobOfferRejected' }])
   })
 
   it('notifies the agency when a dossier is submitted or a payment is reported, once', () => {

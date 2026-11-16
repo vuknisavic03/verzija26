@@ -1,5 +1,7 @@
 import sharp from 'sharp'
 
+import { describeAnthropicError } from '../ai/anthropicErrors.ts'
+
 import {
   extractToolInput,
   normalizeTranslationData,
@@ -23,6 +25,8 @@ export class TranslationUnavailableError extends Error {
   constructor(
     message: string,
     readonly status: 400 | 503 = 503,
+    /** Razlog za agenciju (npr. nema kredita), bez sadržaja dokumenta. */
+    readonly detail = '',
   ) {
     super(message)
   }
@@ -83,10 +87,22 @@ export async function translateWithAi(input: {
     response = await (input.fetchImpl || fetch)(API_URL, {
       body: JSON.stringify({
         max_tokens: 8_000,
-        messages: [{ content: [block, { text: translationUserPrompt(input.doc), type: 'text' }], role: 'user' }],
+        messages: [
+          {
+            content: [
+              block,
+              {
+                text: `${translationUserPrompt(input.doc)}\n\nAnswer only by calling the ${TRANSLATION_TOOL_NAME} tool once. Do not reply with plain text.`,
+                type: 'text',
+              },
+            ],
+            role: 'user',
+          },
+        ],
         model,
         system: TRANSLATION_SYSTEM_PROMPT,
-        tool_choice: { name: TRANSLATION_TOOL_NAME, type: 'tool' },
+        // Neki modeli ne dozvoljavaju nametnut alat (tool_choice "tool"/"any"); „auto" radi sa svima.
+        tool_choice: { type: 'auto' },
         tools: [TRANSLATION_TOOL],
       }),
       headers: {
@@ -106,15 +122,28 @@ export async function translateWithAi(input: {
   }
 
   if (!response.ok) {
-    // Telo greške se ne loguje: može da sadrži delove dokumenta.
-    console.error('Translation API error.', response.status)
-    if (response.status === 400) {
+    // U log ide samo tip i kratka poruka servisa (bez sadržaja dokumenta).
+    const failure = await describeAnthropicError(response)
+    console.error(`Translation API error ${failure.log}`)
+    if (failure.kind === 'billing' || failure.kind === 'auth' || failure.kind === 'model') {
+      throw new TranslationUnavailableError(
+        'AI prevod trenutno nije dostupan. Probaj kasnije ili okači overen prevod sudskog tumača.',
+        503,
+        failure.log,
+      )
+    }
+    if (failure.kind === 'input') {
       throw new TranslationUnavailableError(
         'Ovaj fajl ne može da se prevede (prevelik ili oštećen). Okači PDF ili jasnu fotografiju dokumenta.',
         400,
+        failure.log,
       )
     }
-    throw new TranslationUnavailableError('Prevod trenutno ne može da se napravi. Pokušaj ponovo za nekoliko minuta.')
+    throw new TranslationUnavailableError(
+      'Prevod trenutno ne može da se napravi. Pokušaj ponovo za nekoliko minuta.',
+      503,
+      failure.log,
+    )
   }
 
   let raw: unknown

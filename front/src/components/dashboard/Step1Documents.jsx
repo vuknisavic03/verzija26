@@ -3,7 +3,7 @@
 // Lični podaci su u "Moji podaci", a svi fajlovi i prevodi i u sekciji "Dokumenta".
 import { Button } from "../ui";
 import { UploadIcon, SparklesIcon } from "./icons";
-import { StepShell, TaskList, Actions, LinkButton, FileLine, Notice, StatusPill, RemoveFileButton } from "./ui";
+import { StepShell, StageTasks, Actions, LinkButton, FileLine, Notice, StatusPill, RemoveFileButton } from "./ui";
 import { translationState, getTranslation } from "../../data/candidateStore";
 
 export function buildDocumentTasks(ctx) {
@@ -16,6 +16,7 @@ export function buildDocumentTasks(ctx) {
     isDocumentsRejected,
     isRequirementsMet,
     handleSubmitForReview,
+    isSubmittingDossier,
     setShowProfileBuilderModal,
     pickCv,
     isUploadingCv,
@@ -24,6 +25,7 @@ export function buildDocumentTasks(ctx) {
     isUploadingCert,
     openTranslation,
     removeDocument,
+    markNoTranslation,
   } = ctx;
 
   const locked = isDocumentsApproved || isDocumentsPending; // dosije je predat — fajlovi se ne menjaju dok traje provera
@@ -37,7 +39,7 @@ export function buildDocumentTasks(ctx) {
     const state = translationState(candidate, doc);
     return {
       state:
-        state === "confirmed" || state === "approved"
+        state === "confirmed" || state === "approved" || state === "waived" || state === "declared"
           ? "done"
           : state === "rejected"
           ? "danger"
@@ -51,11 +53,14 @@ export function buildDocumentTasks(ctx) {
         confirmed: "Prevod potvrđen",
         approved: "Prevod odobren",
         rejected: "Ispravi prevod",
+        declared: "Bez prevoda",
+        waived: "Odobreno bez prevoda",
       }[state],
       desc: {
         needed: "Prevedi ga na engleski. Traje do minut.",
         review: "Prevod je gotov. Uporedi ga sa originalom i potvrdi.",
         rejected: getTranslation(candidate, doc)?.rejectionReason || "Agencija je vratila prevod.",
+        declared: "Označio si da je uverenje već na engleskom. Agencija to proverava uz original.",
       }[state] || null,
       translationState: state,
     };
@@ -66,15 +71,26 @@ export function buildDocumentTasks(ctx) {
     if (state === "confirmed" || state === "approved") {
       return <LinkButton onClick={() => openTranslation(doc)}>Pogledaj prevod</LinkButton>;
     }
+    if (state === "waived") return null;
+    if (state === "declared") {
+      return locked ? null : (
+        <LinkButton onClick={() => markNoTranslation(doc, false)}>Ipak ću ga prevesti</LinkButton>
+      );
+    }
     return (
-      <Button
-        variant={state === "rejected" ? "danger" : isNext ? "primary" : "dark"}
-        size="sm"
-        onClick={() => openTranslation(doc)}
-      >
-        {state !== "rejected" && <SparklesIcon className="h-4 w-4" />}
-        {state === "review" ? "Proveri prevod" : state === "rejected" ? "Ispravi prevod" : "Prevedi na engleski"}
-      </Button>
+      <Actions>
+        <Button
+          variant={state === "rejected" ? "danger" : isNext ? "primary" : "dark"}
+          size="sm"
+          onClick={() => openTranslation(doc)}
+        >
+          {state !== "rejected" && <SparklesIcon className="h-4 w-4" />}
+          {state === "review" ? "Proveri prevod" : state === "rejected" ? "Ispravi prevod" : "Prevedi na engleski"}
+        </Button>
+        {!locked && state === "needed" && (
+          <LinkButton onClick={() => markNoTranslation(doc, true)}>Uverenje je već na engleskom</LinkButton>
+        )}
+      </Actions>
     );
   };
 
@@ -115,6 +131,7 @@ export function buildDocumentTasks(ctx) {
     },
     {
       id: "cv",
+      area: "docs",
       title: "Okači CV",
       state: open(candidate.cvFileName),
       status: candidate.cvFileName ? "Okačen" : "Nema fajla",
@@ -142,6 +159,7 @@ export function buildDocumentTasks(ctx) {
     },
     {
       id: "faculty",
+      area: "docs",
       title: "Uverenje o redovnom studiranju",
       state: faculty ? facultyTask.state : open(false),
       status: facultyTask.status,
@@ -172,6 +190,7 @@ export function buildDocumentTasks(ctx) {
     },
     {
       id: "police",
+      area: "docs",
       title: "Uverenje o nekažnjavanju (MUP)",
       state: police ? policeTask.state : open(false),
       status: policeTask.status,
@@ -202,6 +221,7 @@ export function buildDocumentTasks(ctx) {
     },
     {
       id: "submit",
+      area: "docs",
       waitText: "Dosije je na pregledu kod koordinatora",
       title: isDocumentsRejected ? "Pošalji dopunjen dosije" : "Pošalji dosije na pregled",
       state: isDocumentsApproved
@@ -235,10 +255,10 @@ export function buildDocumentTasks(ctx) {
         isDocumentsApproved || isDocumentsPending ? null : (
           <Button
             variant={isDocumentsRejected ? "danger" : isNext ? "primary" : "dark"}
-            disabled={!isRequirementsMet || !isRegistrationDone}
+            disabled={!isRequirementsMet || !isRegistrationDone || isSubmittingDossier}
             onClick={handleSubmitForReview}
           >
-            {isDocumentsRejected ? "Pošalji ponovo na pregled" : "Pošalji dosije"}
+            {isSubmittingDossier ? "Šaljem…" : isDocumentsRejected ? "Pošalji ponovo na pregled" : "Pošalji dosije"}
           </Button>
         ),
     },
@@ -280,7 +300,7 @@ export default function Step1Documents({ ctx, quiet, compact }) {
           )}
         </Notice>
       )}
-      <TaskList tasks={tasks} quiet={quiet} />
+      <StageTasks tasks={tasks} quiet={quiet} goTo={ctx.goTo} />
     </StepShell>
   );
 }

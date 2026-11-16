@@ -11,10 +11,12 @@ export type CandidateNoticeKind =
   | 'contractApproved'
   | 'contractRejected'
   | 'jobOfferReady'
+  | 'jobOfferApproved'
+  | 'jobOfferRejected'
   | 'translationRejected'
   | 'paymentConfirmed'
 
-export type AgencyNoticeKind = 'dossierSubmitted' | 'paymentReported' | 'contractUploaded'
+export type AgencyNoticeKind = 'dossierSubmitted' | 'paymentReported' | 'contractUploaded' | 'jobOfferUploaded'
 
 export interface Notice<K extends string = string> {
   kind: K
@@ -58,6 +60,11 @@ export function candidateNoticesFor(before: Record_ | null, after: Record_): Not
       kind: 'jobOfferReady',
     })
   }
+  if (b.jobOfferVerificationStatus !== 'approved' && after.jobOfferVerificationStatus === 'approved') {
+    notices.push({ details: {}, kind: 'jobOfferApproved' })
+  } else if (b.jobOfferVerificationStatus !== 'rejected' && after.jobOfferVerificationStatus === 'rejected') {
+    notices.push({ details: { reason: str(after.jobOfferRejectionReason) }, kind: 'jobOfferRejected' })
+  }
   return notices
 }
 
@@ -72,6 +79,9 @@ export function agencyNoticesFor(before: Record_ | null, after: Record_): Notice
   if (submittedNow) notices.push({ details: {}, kind: 'dossierSubmitted' })
   if (after.signedContractUploadedAt && after.signedContractUploadedAt !== b.signedContractUploadedAt) {
     notices.push({ details: {}, kind: 'contractUploaded' })
+  }
+  if (after.jobOfferUploadedAt && after.jobOfferUploadedAt !== b.jobOfferUploadedAt) {
+    notices.push({ details: {}, kind: 'jobOfferUploaded' })
   }
   for (const [field, label] of INSTALLMENT_FIELDS) {
     if (b[field] !== 'pending' && b[field] !== 'paid' && after[field] === 'pending') {
@@ -150,15 +160,28 @@ export function renderCandidateNotice(
     case 'jobOfferReady': {
       const role = [d.title, d.employer].filter(Boolean).join(', ')
       return render('Poslodavac te je izabrao | American Adventure', {
-        action: { href: context.portalUrl, label: 'Otvori Job Offer' },
+        action: { href: context.portalUrl, label: 'Otvori portal' },
         heading: 'Poslodavac te je izabrao',
         paragraphs: [
           hi,
-          role ? `Čestitamo! Izabran si za poziciju: ${role}.` : 'Čestitamo! Poslodavac te je izabrao.',
-          'Job Offer te čeka u portalu. Proveri podatke o poslu i smeštaju, pa ga potpiši.',
+          role ? `Čestitamo! Poslodavac ti nudi posao: ${role}.` : 'Čestitamo! Poslodavac ti nudi posao.',
+          'Job Offer stiže od poslodavca. Potpiši ga i okači u portalu, a mi ga proveravamo uz ostala dokumenta.',
         ],
       })
     }
+    case 'jobOfferApproved':
+      return render('Job Offer je odobren | American Adventure', {
+        action: open,
+        heading: 'Job Offer je odobren',
+        paragraphs: [hi, 'Proverili smo tvoj potpisan Job Offer i sve je u redu. Sledeće korake vidiš u portalu.'],
+      })
+    case 'jobOfferRejected':
+      return render('Job Offer treba ispraviti | American Adventure', {
+        action: open,
+        heading: 'Job Offer treba ispraviti',
+        paragraphs: [hi, 'Proverili smo tvoj Job Offer. Okači ga ponovo kad ispraviš ovo:'],
+        quote: d.reason || 'Pogledaj napomenu u portalu.',
+      })
     case 'translationRejected':
       return render('Prevod treba ispraviti | American Adventure', {
         action: open,
@@ -203,6 +226,17 @@ export function renderAgencyNotice(
         action: open,
         heading: 'Kandidat je okačio potpisan ugovor',
         paragraphs: [`${who} je okačio svojeručno potpisan ugovor. Proveri potpise i podatke, pa ugovor overi ili vrati.`],
+      },
+      'Portal American Adventure',
+    )
+  }
+  if (notice.kind === 'jobOfferUploaded') {
+    return render(
+      `Potpisan Job Offer: ${context.candidateName || context.candidateEmail}`,
+      {
+        action: open,
+        heading: 'Kandidat je okačio potpisan Job Offer',
+        paragraphs: [`${who} je okačio potpisan Job Offer. Nalazi se u kartici Dokumenta: proveri ga, pa ga odobri ili vrati.`],
       },
       'Portal American Adventure',
     )

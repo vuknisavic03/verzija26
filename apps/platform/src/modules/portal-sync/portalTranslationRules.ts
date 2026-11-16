@@ -380,3 +380,19 @@ export function translationFlags(candidate: Record<string, unknown>) {
     policeCertificateTranslated: translationAccepted(readTranslation(candidate, 'police')),
   }
 }
+
+/**
+ * Uverenje bez prevoda (već je na engleskom ili dvojezično): kandidat to prijavi ('requested'),
+ * agencija odobri ('approved'). Novi original briše ovu oznaku.
+ */
+export const NO_TRANSLATION_FIELD = {
+  faculty: 'facultyCertNoTranslation',
+  police: 'policeCertNoTranslation',
+} as const satisfies Record<TranslationDoc, string>
+
+export type NoTranslationState = '' | 'requested' | 'approved'
+
+export function noTranslationState(candidate: Record<string, unknown>, doc: TranslationDoc): NoTranslationState {
+  const value = candidate[NO_TRANSLATION_FIELD[doc]]
+  return value === 'requested' || value === 'approved' ? value : ''
+}
