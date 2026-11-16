@@ -7,6 +7,7 @@ import {
   syncFromBackend,
   uploadDocumentWithBackend,
   uploadSignedContractWithBackend,
+  removeDocumentWithBackend,
   readFileAsDataUrl,
   saveCandidateDs160WithBackend,
   getDs160Status,
@@ -548,6 +549,27 @@ export default function Dashboard({
   // Svi fajl-inputi žive na jednom mestu — dugmad u koracima i u "Dokumentima" ih samo otvaraju.
   const pickSignedContract = () => signedContractInputRef.current?.click();
   const pickCv = () => cvInputRef.current?.click();
+
+  // Brisanje okačenog dokumenta (iste provere radi i server: dosije na pregledu, overen ugovor, prijavljena uplata).
+  const canRemoveDocument = (type) => {
+    if (type === "signedContract") {
+      return Boolean(hasSignedContract && !isContractApproved && !isFirstInstallmentPaid && !isFirstInstallmentPending);
+    }
+    return !(isDocumentsApproved || isDocumentsPending);
+  };
+  const removeDocument = async (type) => {
+    const res = await removeDocumentWithBackend(type);
+    if (!res.ok) {
+      flash(res.error, 6000);
+      return false;
+    }
+    setCandidate((prev) => ({ ...(prev || {}), ...res.candidate }));
+    if (type === "cv") setCvFile(null);
+    if (type === "facultyCert") setFacultyFile(null);
+    if (type === "policeCert") setPoliceFile(null);
+    flash(res.message || "Dokument je obrisan.");
+    return true;
+  };
   const pickFacultyCert = () => certInputRef.current?.click();
   const pickPoliceCert = () => policeInputRef.current?.click();
   const openTranslation = (doc) => {
@@ -579,6 +601,8 @@ export default function Dashboard({
     isRegistrationDone,
     isUploadingSignedContract,
     pickSignedContract,
+    canRemoveDocument,
+    removeDocument,
     setShowSignContractModal,
     handlePaymentSlipClick,
     handleReportFirstInstallment,

@@ -82,11 +82,11 @@ const MAP = {
 
 /* ── Delovi ekrana ───────────────────────────────────────────────────────── */
 
-function UploadSlot({ label, hint, image, onPick, disabled }) {
+function UploadSlot({ label, hint, image, onPick, onRemove, disabled }) {
   const inputRef = useRef(null);
   const isPdf = image?.dataUrl?.startsWith("data:application/pdf");
   return (
-    <div>
+    <div className="relative">
       <button
         type="button"
         onClick={() => inputRef.current?.click()}
@@ -105,6 +105,17 @@ function UploadSlot({ label, hint, image, onPick, disabled }) {
         </span>
         {!image?.dataUrl && hint && <span className="mt-0.5 text-xs text-ink-3">{hint}</span>}
       </button>
+      {image?.dataUrl && onRemove && (
+        <button
+          type="button"
+          onClick={onRemove}
+          disabled={disabled}
+          aria-label={`Ukloni: ${label}`}
+          className="mt-2 text-xs font-semibold text-ink-3 underline-offset-4 hover:text-red-700 hover:underline disabled:opacity-60"
+        >
+          Ukloni
+        </button>
+      )}
       <input
         ref={inputRef}
         type="file"
@@ -191,6 +202,8 @@ export default function Step2Documents({ email, code, values, onChange, images, 
   const [submitError, setSubmitError] = useState("");
   // Šta je očitavanje upisalo — takva polja sme ponovo da prepiše, a ono što je kandidat ukucao ne.
   const auto = useRef({});
+  // Sa kog dokumenta je polje automatski upisano (da bi uklanjanje slike obrisalo i te podatke).
+  const autoFrom = useRef({});
 
   const set = (key, value) => {
     onChange({ [key]: value });
@@ -210,6 +223,7 @@ export default function Step2Documents({ email, code, values, onChange, images, 
       if (current === "" || current === auto.current[to]) {
         patch[to] = field.value;
         auto.current[to] = field.value;
+        autoFrom.current[to] = kind;
         nextVerified[to] = Boolean(field.verified);
       }
     }
@@ -240,6 +254,29 @@ export default function Step2Documents({ email, code, values, onChange, images, 
     onImages({ [slot]: image });
     if (slot === "passport") runScan("passport", [image]);
     else runScan("idcard", [next.idFront, next.idBack]);
+  };
+
+  // Uklanjanje slike: briše se i ono što je sa tog dokumenta automatski upisano (ručni unos ostaje).
+  const remove = (slot) => {
+    const kind = slot === "passport" ? "passport" : "idcard";
+    const next = { ...images, [slot]: null };
+    onImages({ [slot]: null });
+    const remaining = kind === "idcard" ? [next.idFront, next.idBack].filter(Boolean) : [];
+    if (remaining.length) {
+      runScan("idcard", remaining);
+      return;
+    }
+    const patch = {};
+    for (const [field, from] of Object.entries(autoFrom.current)) {
+      if (from !== kind) continue;
+      if ((values[field] || "") === auto.current[field]) patch[field] = "";
+      delete autoFrom.current[field];
+      delete auto.current[field];
+    }
+    if (Object.keys(patch).length) onChange(patch);
+    setVerified((v) => Object.fromEntries(Object.entries(v).filter(([field]) => !(field in patch))));
+    setResults((r) => ({ ...r, [kind]: null }));
+    setScan((s) => ({ ...s, [kind]: { status: "idle" } }));
   };
 
   // Poređenje dva dokumenta
@@ -295,6 +332,7 @@ export default function Step2Documents({ email, code, values, onChange, images, 
               hint="JPG, PNG ili PDF"
               image={images.passport}
               onPick={(f) => pick("passport", f)}
+              onRemove={() => remove("passport")}
               disabled={scan.passport.status === "scanning"}
             />
           </div>
@@ -307,8 +345,20 @@ export default function Step2Documents({ email, code, values, onChange, images, 
           </h2>
           <p className="mt-0.5 text-sm text-ink-3">Obe strane. Na zadnjoj su JMBG i tri reda sa znakovima „&lt;".</p>
           <div className="mt-3 grid grid-cols-2 gap-3">
-            <UploadSlot label="Prednja strana" image={images.idFront} onPick={(f) => pick("idFront", f)} disabled={scan.idcard.status === "scanning"} />
-            <UploadSlot label="Zadnja strana" image={images.idBack} onPick={(f) => pick("idBack", f)} disabled={scan.idcard.status === "scanning"} />
+            <UploadSlot
+              label="Prednja strana"
+              image={images.idFront}
+              onPick={(f) => pick("idFront", f)}
+              onRemove={() => remove("idFront")}
+              disabled={scan.idcard.status === "scanning"}
+            />
+            <UploadSlot
+              label="Zadnja strana"
+              image={images.idBack}
+              onPick={(f) => pick("idBack", f)}
+              onRemove={() => remove("idBack")}
+              disabled={scan.idcard.status === "scanning"}
+            />
           </div>
           <ScanStatus state={scan.idcard} />
         </section>

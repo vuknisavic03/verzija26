@@ -335,6 +335,13 @@ export async function writePortalDb(
 }
 
 /** Brisanje kandidata i njegovih dokumenata (jedini put kojim zapis nestaje). */
+/** Briše jedan sačuvan dokument (vlasnik se proverava pre poziva). */
+export async function deletePortalDocument(payload: Payload, id: number | string) {
+  const numericId = Number(id)
+  if (!Number.isFinite(numericId)) return
+  await payload.delete({ collection: 'portal-documents', id: numericId, overrideAccess: true }).catch(() => {})
+}
+
 export async function deletePortalRecord(payload: Payload, idOrEmail: string | number) {
   const needle = String(idOrEmail).trim()
   const lowered = needle.toLowerCase()

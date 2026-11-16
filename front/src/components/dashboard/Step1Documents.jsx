@@ -3,7 +3,7 @@
 // Lični podaci su u "Moji podaci", a svi fajlovi i prevodi i u sekciji "Dokumenta".
 import { Button } from "../ui";
 import { UploadIcon, SparklesIcon } from "./icons";
-import { StepShell, TaskList, Actions, LinkButton, FileLine, Notice, StatusPill } from "./ui";
+import { StepShell, TaskList, Actions, LinkButton, FileLine, Notice, StatusPill, RemoveFileButton } from "./ui";
 import { translationState, getTranslation } from "../../data/candidateStore";
 
 export function buildDocumentTasks(ctx) {
@@ -23,6 +23,7 @@ export function buildDocumentTasks(ctx) {
     pickPoliceCert,
     isUploadingCert,
     openTranslation,
+    removeDocument,
   } = ctx;
 
   const locked = isDocumentsApproved || isDocumentsPending; // dosije je predat — fajlovi se ne menjaju dok traje provera
@@ -122,9 +123,12 @@ export function buildDocumentTasks(ctx) {
         candidate.cvFileName ? (
           <FileLine name={candidate.cvFileName}>
             {!locked && (
-              <LinkButton onClick={pickCv} disabled={isUploadingCv} className="ml-1">
-                Zameni
-              </LinkButton>
+              <>
+                <LinkButton onClick={pickCv} disabled={isUploadingCv} className="ml-1">
+                  Zameni
+                </LinkButton>
+                <RemoveFileButton onConfirm={() => removeDocument("cv")} />
+              </>
             )}
           </FileLine>
         ) : (
@@ -147,9 +151,12 @@ export function buildDocumentTasks(ctx) {
           <div className="space-y-3">
             <FileLine name={faculty}>
               {!locked && (
-                <LinkButton onClick={pickFacultyCert} disabled={isUploadingCert} className="ml-1">
-                  Zameni
-                </LinkButton>
+                <>
+                  <LinkButton onClick={pickFacultyCert} disabled={isUploadingCert} className="ml-1">
+                    Zameni
+                  </LinkButton>
+                  <RemoveFileButton onConfirm={() => removeDocument("facultyCert")} />
+                </>
               )}
             </FileLine>
             {translationActions("faculty", isNext)}
@@ -174,9 +181,12 @@ export function buildDocumentTasks(ctx) {
           <div className="space-y-3">
             <FileLine name={police}>
               {!locked && (
-                <LinkButton onClick={pickPoliceCert} disabled={isUploadingCert} className="ml-1">
-                  Zameni
-                </LinkButton>
+                <>
+                  <LinkButton onClick={pickPoliceCert} disabled={isUploadingCert} className="ml-1">
+                    Zameni
+                  </LinkButton>
+                  <RemoveFileButton onConfirm={() => removeDocument("policeCert")} />
+                </>
               )}
             </FileLine>
             {translationActions("police", isNext)}

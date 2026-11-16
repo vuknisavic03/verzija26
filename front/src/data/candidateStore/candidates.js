@@ -821,6 +821,25 @@ export async function uploadSignedContractWithBackend(file, email) {
   }
 }
 
+/**
+ * Kandidat briše dokument koji je okačio (cv, facultyCert, policeCert, signedContract).
+ * Vraća { ok, candidate, message } ili { ok: false, error }.
+ */
+export async function removeDocumentWithBackend(type) {
+  try {
+    const res = await fetch(`/api/public/documents/upload?type=${encodeURIComponent(type)}`, {
+      method: "DELETE",
+      credentials: "include",
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.candidate) return { ok: false, error: data.message || "Brisanje nije uspelo. Probaj ponovo." };
+    const saved = saveCandidate(data.candidate, { skipRemoteSync: true });
+    return { ok: true, candidate: saved, message: data.message };
+  } catch {
+    return { ok: false, error: "Nema veze sa serverom. Proveri internet i probaj ponovo." };
+  }
+}
+
 export async function saveCandidateDs160WithBackend(candidateId, email, ds160) {
   const candidates = loadData(CANDIDATES_KEY, []);
   const idx = candidates.findIndex(

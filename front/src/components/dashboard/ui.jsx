@@ -316,6 +316,43 @@ export function LinkButton({ className = "", children, ...props }) {
 }
 
 /** Ime okačenog fajla sa kvačicom. */
+/** „Obriši" u dva koraka (potvrda u istom redu), bez sistemskog prozora. */
+export function RemoveFileButton({ onConfirm, label = "Obriši", className = "" }) {
+  const [confirming, setConfirming] = useState(false);
+  const [busy, setBusy] = useState(false);
+  if (!confirming) {
+    return (
+      <button
+        type="button"
+        onClick={() => setConfirming(true)}
+        className={cx("text-[13px] font-medium text-ink-3 underline decoration-line-strong underline-offset-4 hover:text-red-700 hover:decoration-red-700", className)}
+      >
+        {label}
+      </button>
+    );
+  }
+  return (
+    <span className={cx("inline-flex items-center gap-3 text-[13px]", className)}>
+      <button
+        type="button"
+        disabled={busy}
+        onClick={async () => {
+          setBusy(true);
+          const ok = await onConfirm();
+          setBusy(false);
+          if (ok === false) setConfirming(false);
+        }}
+        className="font-semibold text-red-700 underline underline-offset-4 disabled:opacity-50"
+      >
+        {busy ? "Brišem…" : "Da, obriši"}
+      </button>
+      <button type="button" disabled={busy} onClick={() => setConfirming(false)} className="font-medium text-ink-3 hover:text-ink">
+        Otkaži
+      </button>
+    </span>
+  );
+}
+
 export function FileLine({ name, className = "", children }) {
   return (
     <span className={cx("flex min-w-0 items-center gap-2 text-sm text-ink-2", className)}>

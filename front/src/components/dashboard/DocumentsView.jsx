@@ -1,6 +1,6 @@
 // front/src/components/dashboard/DocumentsView.jsx
 // Svi dokumenti na jednom mestu: šta preuzimaš, šta si okačio i šta stiže od nas.
-import { Panel, LinkButton, TaskIcon } from "./ui";
+import { Panel, LinkButton, TaskIcon, RemoveFileButton } from "./ui";
 import {
   downloadContractPdf,
   downloadResponsibilityStatementPdf,
@@ -59,6 +59,8 @@ export default function DocumentsView({ ctx }) {
     isContractPending,
     setShowSignContractModal,
     pickSignedContract,
+    canRemoveDocument,
+    removeDocument,
     pickCv,
     pickFacultyCert,
     pickPoliceCert,
@@ -109,7 +111,10 @@ export default function DocumentsView({ ctx }) {
           status={isContractApproved ? "Overen" : isContractPending ? "Na overi" : "Nedostaje"}
         >
           {hasSignedContract ? (
-            <LinkButton onClick={pickSignedContract}>Zameni</LinkButton>
+            <>
+              <LinkButton onClick={pickSignedContract}>Zameni</LinkButton>
+              {canRemoveDocument("signedContract") && <RemoveFileButton onConfirm={() => removeDocument("signedContract")} />}
+            </>
           ) : (
             <LinkButton onClick={() => setShowSignContractModal(true)}>Potpiši i okači</LinkButton>
           )}
@@ -138,6 +143,7 @@ export default function DocumentsView({ ctx }) {
           status={candidate.cvFileName ? "Okačen" : "Nedostaje"}
         >
           <LinkButton onClick={pickCv}>{candidate.cvFileName ? "Zameni" : "Okači"}</LinkButton>
+          {candidate.cvFileName && canRemoveDocument("cv") && <RemoveFileButton onConfirm={() => removeDocument("cv")} />}
         </DocRow>
         <DocRow
           name="Uverenje o redovnom studiranju"
@@ -147,6 +153,7 @@ export default function DocumentsView({ ctx }) {
         >
           {trLinks("faculty")}
           <LinkButton onClick={pickFacultyCert}>{faculty ? "Zameni" : "Okači"}</LinkButton>
+          {faculty && canRemoveDocument("facultyCert") && <RemoveFileButton onConfirm={() => removeDocument("facultyCert")} />}
         </DocRow>
         <DocRow
           name="Uverenje o nekažnjavanju (MUP)"
@@ -156,6 +163,7 @@ export default function DocumentsView({ ctx }) {
         >
           {trLinks("police")}
           <LinkButton onClick={pickPoliceCert}>{police ? "Zameni" : "Okači"}</LinkButton>
+          {police && canRemoveDocument("policeCert") && <RemoveFileButton onConfirm={() => removeDocument("policeCert")} />}
         </DocRow>
         <DocRow name="Pasoš" sub={candidate.passportNumber ? `Broj ${candidate.passportNumber}` : "Sken iz registracije"} tone="done" status="Priložen" />
       </Group>

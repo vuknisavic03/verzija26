@@ -2,7 +2,7 @@
 // Registracija: ugovor → prva uplata. Program, popusti i uplatnice žive u sekcijama "Uplate" i "Moji podaci".
 import { Button } from "../ui";
 import { UploadIcon } from "./icons";
-import { StepShell, TaskList, Actions, LinkButton, FileLine, StatusPill } from "./ui";
+import { StepShell, TaskList, Actions, LinkButton, FileLine, StatusPill, RemoveFileButton } from "./ui";
 import { downloadContractPdf, downloadResponsibilityStatementPdf } from "../../data/candidateStore";
 
 export function firstPaymentAmount(candidate) {
@@ -21,6 +21,8 @@ export function buildRegistrationTasks(ctx) {
     isFirstInstallmentPending,
     isUploadingSignedContract,
     pickSignedContract,
+    canRemoveDocument,
+    removeDocument,
     setShowSignContractModal,
     handlePaymentSlipClick,
     handleReportFirstInstallment,
@@ -56,6 +58,7 @@ export function buildRegistrationTasks(ctx) {
               <LinkButton onClick={pickSignedContract} disabled={isUploadingSignedContract} className="ml-1">
                 Zameni
               </LinkButton>
+              {canRemoveDocument?.("signedContract") && <RemoveFileButton onConfirm={() => removeDocument("signedContract")} />}
             </FileLine>
           ) : (
             <>

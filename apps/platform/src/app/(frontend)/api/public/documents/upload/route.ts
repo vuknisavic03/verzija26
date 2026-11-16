@@ -1,4 +1,3 @@
-import { notifyAgencyChanges } from '@/modules/portal-sync/portalNotifications.ts'
 import fs from 'node:fs'
 import path from 'node:path'
 import config from '@payload-config'
@@ -6,11 +5,19 @@ import { getPayload } from 'payload'
 
 import { resolvePortalActor } from '@/modules/portal-sync/access.ts'
 import {
+  deletePortalDocument,
   MAX_PORTAL_DOCUMENT_BYTES,
   readPortalDocument,
   storePortalDocument,
 } from '@/modules/portal-sync/portalDb.ts'
 import { getPortalState, savePortalCandidate } from '@/modules/portal-sync/localStore.ts'
+import {
+  DocumentRemovalError,
+  documentIdFromUrl,
+  isRemovableDocument,
+  removeCandidateDocument,
+} from '@/modules/portal-sync/portalDocumentRemoval.ts'
+import { notifyAgencyChanges } from '@/modules/portal-sync/portalNotifications.ts'
 import { attachUploadedTranslation, clearTranslation, PortalTranslationError } from '@/modules/portal-sync/portalTranslations.ts'
 import { isSameOriginRequest } from '@/modules/security/sameOrigin.ts'
 
@@ -19,6 +26,34 @@ function json(body: unknown, status = 200) {
     headers: { 'Cache-Control': 'no-store' },
     status,
   })
+}
+
+/** Kandidat briše dokument koji je okačio (CV, uverenja, potpisan ugovor). */
+export async function DELETE(request: Request) {
+  if (!isSameOriginRequest(request)) return json({ message: 'Zahtev nije dozvoljen.' }, 403)
+  const actor = await resolvePortalActor()
+  if (actor.kind !== 'candidate') return json({ message: 'Prijavi se ponovo.' }, 401)
+  const type = new URL(request.url).searchParams.get('type') || ''
+  if (!isRemovableDocument(type)) return json({ message: 'Ovaj dokument ne može da se obriše.' }, 400)
+  try {
+    const state = await getPortalState()
+    const candidate = state.candidates.find((c) => String(c.email || '').toLowerCase() === actor.email.toLowerCase())
+    if (!candidate) return json({ message: 'Profil nije pronađen.' }, 404)
+    const { label, next, url } = removeCandidateDocument(candidate as unknown as Record<string, unknown>, type)
+    const saved = await savePortalCandidate(next as never)
+    // Isti fajl se čuva jednom: briši ga samo ako ga više ništa u dosijeu ne koristi.
+    const docId = documentIdFromUrl(url)
+    if (docId && !JSON.stringify(saved).includes(`doc=${docId}"`)) {
+      const payload = await getPayload({ config })
+      const doc = await readPortalDocument(payload, docId)
+      if (doc && doc.email === actor.email) await deletePortalDocument(payload, docId)
+    }
+    return json({ candidate: saved, message: `${label} je obrisan.`, success: true })
+  } catch (error) {
+    if (error instanceof DocumentRemovalError) return json({ message: error.message }, error.status)
+    console.error('Document removal failed.', error instanceof Error ? error.name : 'UNKNOWN_ERROR')
+    return json({ message: 'Brisanje nije uspelo. Probaj ponovo.' }, 500)
+  }
 }
 
 export async function GET(request: Request) {
