@@ -36,7 +36,7 @@
     "@tesseract.js-data/eng": "^1.0.0",
     "cross-env": "10.1.0",
     "exceljs": "4.4.0",
-    "graphql": "16.14.2",
+    "graphql": "16.15.0",
     "mrz": "^5.0.2",
     "next": "16.4.4",
     "payload": "3.92.1",
