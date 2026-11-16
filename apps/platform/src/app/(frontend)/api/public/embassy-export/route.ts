@@ -1,8 +1,11 @@
+import { resolvePortalActor } from '@/modules/portal-sync/access.ts'
 import { getPortalState } from '@/modules/portal-sync/localStore.ts'
 import { generateEmbassyExcelBuffer } from '@/modules/admin-candidates/export.ts'
 import type { AdminCandidateOverviewItem } from '@/modules/admin-candidates/rules.ts'
 
 export async function GET() {
+  const actor = await resolvePortalActor()
+  if (actor.kind !== 'admin') return new Response('Pristup odbijen.', { status: 401 })
   try {
     const state = await getPortalState()
 
@@ -15,11 +18,12 @@ export async function GET() {
         fullName: `${c.firstName || ''} ${c.lastName || ''}`.trim() || c.name || 'Kandidat',
         email: c.email || '',
         phone: c.phone || '',
-        idCardOrPassportNumber: c.idCardNumber || '010948212',
-        dateOfBirth: '2001-08-15',
+        // Tabela za ambasadu traži broj PASOŠA; podatak koji fali ostaje prazan, ništa se ne izmišlja.
+        idCardOrPassportNumber: c.passportNumber || undefined,
+        dateOfBirth: String(c.birthDate || c.dateOfBirth || '') || undefined,
         citizenship: 'SRB',
-        facultyName: c.faculty || 'University of Belgrade',
-        studyCity: 'Belgrade',
+        facultyName: c.faculty || undefined,
+        studyCity: String(c.studyCity || c.city || '') || undefined,
         programCode: c.packageId || 'swt-full',
         packageName: c.packageName || 'Work & Travel USA',
         processStatus: c.status === 'ready' ? 'COMPLETED' : 'ACTIVE',
@@ -27,10 +31,10 @@ export async function GET() {
         currentStepLabel: c.status,
         progressPercent: c.progress || 30,
         hasJobOffer: ['job', 'departure', 'ready'].includes(c.status),
-        employerName: c.preferences?.position || 'Cape Cod Resort',
-        jobTitle: c.preferences?.position || 'Server',
-        workCity: 'Cape Cod',
-        workState: 'MA',
+        employerName: String(c.selectedJobEmployer || c.jobEmployer || '') || undefined,
+        jobTitle: String(c.selectedJobTitle || c.jobTitle || '') || undefined,
+        workCity: String(c.selectedJobCity || c.jobCity || '') || undefined,
+        workState: undefined,
         finalPrice: c.finalPrice,
         paymentMethod: c.paymentMethod,
         adminNotes: c.notes,

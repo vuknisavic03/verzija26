@@ -1,9 +1,9 @@
 // front/src/data/candidateStore/contract.js
-// Ugovor u portalu: pregled, snimanje podataka za ugovor, elektronsko prihvatanje i preuzimanje.
+// Ugovor u portalu: pregled, snimanje podataka za ugovor, preuzimanje i slanje mejlom (potpis je svojeručni).
 // Svi podaci se čitaju i pišu na serveru — pregledač ne sastavlja ugovor sam.
 
 import { saveCandidate } from "./candidates.js";
-import { getCurrentUser, syncFromBackend } from "./session.js";
+import { getCurrentUser } from "./session.js";
 
 async function readJson(res) {
   return res.json().catch(() => ({}));
@@ -21,15 +21,15 @@ export async function fetchContractPreview() {
   }
 }
 
-/** Snima JMBG i broj pasoša i čeka potvrdu servera (ugovor se pravi tek iz sačuvanih podataka). */
-export async function saveContractDetails({ jmbg, passportNumber }) {
+/** Snima podatke za ugovor i čeka potvrdu servera (ugovor se pravi tek iz sačuvanih podataka). */
+export async function saveContractDetails({ jmbg, passportNumber, address, phone }) {
   const current = getCurrentUser() || {};
   try {
     const res = await fetch("/api/public/portal-state", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       credentials: "include",
-      body: JSON.stringify({ action: "saveCandidate", payload: { ...current, jmbg, passportNumber } }),
+      body: JSON.stringify({ action: "saveCandidate", payload: { ...current, jmbg, passportNumber, address, phone } }),
     });
     const data = await readJson(res);
     if (!res.ok || !data.candidate) return { ok: false, error: data.message || "Podaci nisu sačuvani. Probaj ponovo." };
@@ -40,19 +40,14 @@ export async function saveContractDetails({ jmbg, passportNumber }) {
   }
 }
 
-/** Elektronsko prihvatanje: šalje otisak ugovora koji je kandidat video. */
-export async function acceptContract(fingerprint) {
+/** Šalje ugovor sa podacima kandidata (PDF u prilogu) na njegov email. */
+export async function emailPortalContract() {
   try {
-    const res = await fetch("/api/public/contracts/accept", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      credentials: "include",
-      body: JSON.stringify({ confirm: true, fingerprint }),
-    });
+    const res = await fetch("/api/public/contracts/email", { method: "POST", credentials: "include" });
     const data = await readJson(res);
-    if (!res.ok) return { ok: false, status: res.status, error: data.message || "Potpis nije uspeo. Probaj ponovo." };
-    const synced = await syncFromBackend();
-    return { ok: true, acceptance: data.acceptance, candidate: synced?.candidate || null };
+    if (res.status === 429) return { ok: false, error: "Ugovor je već poslat više puta. Preuzmi ga ovde ili probaj kasnije." };
+    if (!res.ok) return { ok: false, error: data.message || "Slanje nije uspelo. Preuzmi ugovor ovde." };
+    return { ok: true, message: data.message || "Ugovor je poslat na tvoj email." };
   } catch {
     return { ok: false, error: "Nema veze sa serverom. Proveri internet i probaj ponovo." };
   }

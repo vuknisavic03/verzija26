@@ -11,7 +11,7 @@ export async function POST(request: Request) {
 
     const result = await verifyPortalInvitation(String(email || ''), String(code || ''))
     if (!result.valid) {
-      return json({ message: result.message, valid: false }, result.status)
+      return json({ alreadyActive: 'alreadyActive' in result ? result.alreadyActive : false, message: result.message, valid: false }, result.status)
     }
 
     return json(

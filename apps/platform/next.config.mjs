@@ -16,9 +16,13 @@ const nextConfig = {
     ]
   },
   output: 'standalone',
+  // Fajlovi koje kod čita sa diska, a standalone build ih sam ne prati:
+  // font za sve PDF-ove (ugovor, fakture, Job Offer, prevodi) i jezički fajl za lokalni OCR.
   outputFileTracingIncludes: {
-    '/api/admin/contracts/generate': ['./node_modules/next/dist/compiled/@vercel/og/Geist-Regular.ttf'],
-    '/api/contracts/*/download': ['./node_modules/next/dist/compiled/@vercel/og/Geist-Regular.ttf'],
+    '/*': [
+      './node_modules/next/dist/compiled/@vercel/og/Geist-Regular.ttf',
+      './node_modules/@tesseract.js-data/eng/4.0.0_best_int/**',
+    ],
   },
   poweredByHeader: false,
   reactStrictMode: true,

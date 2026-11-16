@@ -14,7 +14,7 @@ export type CandidateNoticeKind =
   | 'translationRejected'
   | 'paymentConfirmed'
 
-export type AgencyNoticeKind = 'dossierSubmitted' | 'paymentReported'
+export type AgencyNoticeKind = 'dossierSubmitted' | 'paymentReported' | 'contractUploaded'
 
 export interface Notice<K extends string = string> {
   kind: K
@@ -70,6 +70,9 @@ export function agencyNoticesFor(before: Record_ | null, after: Record_): Notice
     after.documentsVerificationStatus === 'pending' &&
     !(b.documentsSubmittedForReview === true && b.documentsVerificationStatus === 'pending')
   if (submittedNow) notices.push({ details: {}, kind: 'dossierSubmitted' })
+  if (after.signedContractUploadedAt && after.signedContractUploadedAt !== b.signedContractUploadedAt) {
+    notices.push({ details: {}, kind: 'contractUploaded' })
+  }
   for (const [field, label] of INSTALLMENT_FIELDS) {
     if (b[field] !== 'pending' && b[field] !== 'paid' && after[field] === 'pending') {
       notices.push({ details: { installment: label }, kind: 'paymentReported' })
@@ -193,6 +196,17 @@ export function renderAgencyNotice(
       'Portal American Adventure',
     )
   }
+  if (notice.kind === 'contractUploaded') {
+    return render(
+      `Potpisan ugovor: ${context.candidateName || context.candidateEmail}`,
+      {
+        action: open,
+        heading: 'Kandidat je okačio potpisan ugovor',
+        paragraphs: [`${who} je okačio svojeručno potpisan ugovor. Proveri potpise i podatke, pa ugovor overi ili vrati.`],
+      },
+      'Portal American Adventure',
+    )
+  }
   return render(
     `Prijavljena uplata: ${context.candidateName || context.candidateEmail}, ${notice.details.installment}`,
     {
@@ -202,6 +216,57 @@ export function renderAgencyNotice(
     },
     'Portal American Adventure',
   )
+}
+
+/** Pozivnica: kod za registraciju i link sa već upisanim emailom i kodom. */
+export function renderInvitation(input: {
+  candidateName: string
+  code: string
+  email: string
+  finalPrice: number
+  packageName: string
+  siteUrl: string
+}): RenderedNotice {
+  const first = input.candidateName.trim().split(/\s+/)[0] || ''
+  const link = `${input.siteUrl}/registracija?email=${encodeURIComponent(input.email)}&kod=${encodeURIComponent(input.code)}`
+  return render(
+    'Pozivnica za American Adventure portal',
+    {
+      action: { href: link, label: 'Registruj se' },
+      heading: 'Pozvan si u American Adventure portal',
+      paragraphs: [
+        first ? `Zdravo ${first},` : 'Zdravo,',
+        `Agencija te je pozvala na program ${input.packageName}${input.finalPrice ? ` (cena ${input.finalPrice.toLocaleString('sr-Latn-RS')} USD)` : ''}. U portalu kačiš dokumenta, potpisuješ ugovor, biraš posao i pratiš sve do odlaska.`,
+        `Tvoj kod za registraciju je ${input.code}. Klikni na dugme ispod: email i kod su već upisani.`,
+      ],
+    },
+  )
+}
+
+/** Potvrda emaila posle registracije. */
+export function renderEmailVerification(input: { firstName: string; link: string }): RenderedNotice {
+  return render('Potvrdi email | American Adventure', {
+    action: { href: input.link, label: 'Potvrdi email' },
+    heading: 'Potvrdi svoj email',
+    paragraphs: [
+      input.firstName ? `Zdravo ${input.firstName},` : 'Zdravo,',
+      'Još jedan korak: potvrdi da je ovo tvoj email, pa se prijavi u portal lozinkom koju si izabrao.',
+      'Link važi 48 sati. Ako se nisi ti registrovao, zanemari ovu poruku.',
+    ],
+  })
+}
+
+export function renderContractEmail(input: { contractNumber: string; firstName: string; portalLink: string }): RenderedNotice {
+  return render(`Ugovor ${input.contractNumber} | American Adventure`, {
+    action: { href: input.portalLink, label: 'Okači potpisan ugovor' },
+    heading: 'Tvoj ugovor za potpis',
+    paragraphs: [
+      input.firstName ? `Zdravo ${input.firstName},` : 'Zdravo,',
+      `U prilogu je ugovor broj ${input.contractNumber} sa tvojim podacima, zajedno sa Izjavom o odgovornosti.`,
+      'Odštampaj ga na A4 papiru, potpiši plavom ili crnom hemijskom na označenim mestima, pa ga uslikaj ili skeniraj i okači u portal (Ugovor → Okači potpisan ugovor).',
+      'Posle toga ti se otvara uplata, a agencija proverava potpisan ugovor.',
+    ],
+  })
 }
 
 /** Javni sajt (gde je portal), ne adresa backenda. */

@@ -33,6 +33,7 @@
     "@payloadcms/richtext-lexical": "3.92.1",
     "@payloadcms/ui": "3.92.1",
     "@pdf-lib/fontkit": "1.1.1",
+    "@tesseract.js-data/eng": "^1.0.0",
     "cross-env": "10.1.0",
     "exceljs": "4.4.0",
     "graphql": "16.14.2",

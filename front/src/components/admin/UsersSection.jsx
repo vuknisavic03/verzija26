@@ -3,12 +3,12 @@ import { useTranslation } from "../../i18n/LanguageContext";
 import {
   getInvitations,
   createInvitation,
+  resendInvitationEmail,
   getCandidates,
   saveCandidate,
   deleteCandidate,
   syncFromBackend,
   downloadEmbassyExport,
-  resetInvitation,
   recordContactAttempt,
   sendQualificationMaterials,
   scheduleConsultation,
@@ -16,7 +16,6 @@ import {
   qualifyCandidateAndIssueCode,
   rejectPreApplication,
   createManualPreApplication,
-  activateCandidateAccount,
   markCandidateSelection,
   approveProfileReadiness,
   downloadPreApplicationsExcel,
@@ -64,6 +63,8 @@ export default function UsersSection({ openCandidateId = null, onOpened = () => 
   const [activeTab, setActiveTab] = useState("preApplications"); // preApplications | candidates | invitations
   const [showCodeModal, setShowCodeModal] = useState(false);
   const [invitations, setInvitations] = useState(getInvitations);
+  // Iskorišćena pozivnica (kandidat se registrovao) više nije posao za agenciju.
+  const openInvitations = invitations.filter((i) => i.status !== "registered");
   const [successToast, setSuccessToast] = useState("");
 
   // Faza 0: Stanja modala i filtera
@@ -157,6 +158,15 @@ export default function UsersSection({ openCandidateId = null, onOpened = () => 
     }
   };
 
+  // Zapis koji je server već sačuvao (npr. overa ugovora): samo osveži listu, bez ponovnog slanja.
+  const handleCandidateSaved = (saved) => {
+    setStudents((prev) => {
+      const remaining = prev.filter((s) => s.id !== saved.id && s.email?.toLowerCase() !== saved.email?.toLowerCase());
+      return [mapCandidatesToRows([saved])[0], ...remaining];
+    });
+    setSelectedCandidate(saved);
+  };
+
   const handleDeleteCandidate = (candidateId, candidateName) => {
     if (!window.confirm(`Da li ste sigurni da želite da obrišete kandidata ${candidateName}?`)) return;
     deleteCandidate(candidateId);
@@ -191,14 +201,6 @@ export default function UsersSection({ openCandidateId = null, onOpened = () => 
         setTimeout(() => setSuccessToast(""), 5000);
       }
     }
-  };
-
-  const handleResetInvitation = (invCode) => {
-    resetInvitation(invCode);
-    setInvitations(getInvitations());
-    setStudents(mapCandidatesToRows(getCandidates()));
-    setSuccessToast(`Kod ${invCode} je uspešno resetovan na 'Čeka registraciju'! Kandidat sada može da aktivira nalog.`);
-    setTimeout(() => setSuccessToast(""), 5000);
   };
 
   // --- Handleri za Fazu 0 (Trijaža, pozivi, konsultacije, selekcioni gate) ---
@@ -261,9 +263,9 @@ export default function UsersSection({ openCandidateId = null, onOpened = () => 
   };
 
   // FR-015 & Selekcioni Readiness Gate pre kreiranja profila i izdavanja koda
-  const handleApproveReadiness = ({ packageId, discount, discountNote, bypassPrerequisites }) => {
+  const handleApproveReadiness = async ({ packageId, discount, discountNote, bypassPrerequisites }) => {
     if (!selectedReadinessCandidate) return null;
-    const res = approveProfileReadiness(selectedReadinessCandidate.id, {
+    const res = await approveProfileReadiness(selectedReadinessCandidate.id, {
       packageId,
       discount,
       discountNote,
@@ -272,17 +274,25 @@ export default function UsersSection({ openCandidateId = null, onOpened = () => 
     if (res?.candidate) {
       setStudents(mapCandidatesToRows(getCandidates()));
       setInvitations(getInvitations());
-      setSuccessToast(`Preduslovi su odobreni. Kod ${res.invitation.code} je generisan za ${res.candidate.name}.`);
+      setSuccessToast(
+        res.emailSent
+          ? `Preduslovi su odobreni. Pozivnica sa kodom ${res.invitation.code} je poslata na ${res.candidate.email}.`
+          : `Preduslovi su odobreni. Kod ${res.invitation.code} je napravljen, ali mejl nije poslat — pošalji ga iz liste pozivnica.`
+      );
       setTimeout(() => setSuccessToast(""), 6000);
       return res;
+    }
+    if (res?.error) {
+      setSuccessToast(res.error);
+      setTimeout(() => setSuccessToast(""), 6000);
     }
     return null;
   };
 
-  const handleQualifyCandidate = ({ packageId, discount, discountNote }) => {
+  const handleQualifyCandidate = async ({ packageId, discount, discountNote }) => {
     if (!selectedQualifyCandidate) return;
-    const res = qualifyCandidateAndIssueCode(selectedQualifyCandidate.id, { packageId, discount, discountNote });
-    if (res) {
+    const res = await qualifyCandidateAndIssueCode(selectedQualifyCandidate.id, { packageId, discount, discountNote });
+    if (res?.candidate) {
       setStudents((prev) => prev.map((s) => (s.id === res.candidate.id ? { ...s, ...res.candidate } : s)));
       setInvitations(getInvitations());
       setSuccessToast(`Kandidat ${res.candidate.firstName} ${res.candidate.lastName} je KVALIFIKOVAN! Generisan je kod: ${res.invitation.code}`);
@@ -313,19 +323,24 @@ export default function UsersSection({ openCandidateId = null, onOpened = () => 
     }
   };
 
-  // 1-klik direktna aktivacija naloga iz Faze 0 (Prijava & Selekcija) u Fazu 1 (Aktivni kandidati)
-  const handleActivateCandidate = (candidate) => {
-    const updated = activateCandidateAccount(candidate.id || candidate.email);
-    if (updated) {
-      setStudents(mapCandidatesToRows(getCandidates()));
-      setInvitations(getInvitations());
-      setSuccessToast(`Nalog za ${updated.firstName} ${updated.lastName} je aktiviran. Kandidat je sada u programu.`);
+  // Nalog pravi samo kandidat (registracija sa svojom lozinkom i potvrda emaila).
+  // Agencija može samo ponovo da pošalje pozivnicu.
+  const handleResendInvitation = async (email, code) => {
+    const inv = code
+      ? { code }
+      : invitations.find((i) => i.email?.toLowerCase() === String(email || "").toLowerCase() && i.status !== "registered");
+    if (!inv?.code) {
+      setSuccessToast("Za ovog kandidata nema pozivnice. Napravi je preko „Odobri i generiši kod“.");
       setTimeout(() => setSuccessToast(""), 5000);
+      return;
     }
+    const res = await resendInvitationEmail(inv.code);
+    setSuccessToast(res.ok ? `Pozivnica je ponovo poslata${email ? ` na ${email}` : ""}.` : res.message);
+    setTimeout(() => setSuccessToast(""), 4500);
   };
 
   // 1-klik brzo unapređenje kandidata u sledeću fazu direktno iz tabele (Faze 1-3)
-  const handleQuickAdvance = (candidate) => {
+  const handleQuickAdvance = async (candidate) => {
     const currentStatus = candidate.status || "applying";
     const flow = STATUS_FLOW[currentStatus] || STATUS_FLOW.applying;
     const nextStatusId = flow.nextId;
@@ -335,14 +350,19 @@ export default function UsersSection({ openCandidateId = null, onOpened = () => 
     if (currentStatus === "applying") {
       const existingInv = invitations.find((i) => i.email.toLowerCase() === candidate.email.toLowerCase());
       if (!existingInv) {
-        const newInv = createInvitation({
+        const res = await createInvitation({
           email: candidate.email,
           candidateName: candidate.name,
           packageId: candidate.packageId || "swt-full",
           discount: candidate.discount || 0,
           discountNote: candidate.discountNote || "Odobrena prijava",
         });
-        createdInvCode = newInv.code;
+        if (!res.ok) {
+          setSuccessToast(res.error);
+          setTimeout(() => setSuccessToast(""), 4500);
+          return;
+        }
+        createdInvCode = res.invitation.code;
         setInvitations(getInvitations());
       } else {
         createdInvCode = existingInv.code;
@@ -584,7 +604,7 @@ export default function UsersSection({ openCandidateId = null, onOpened = () => 
         {[
           ["preApplications", "Nove prijave", preAppsList.length],
           ["candidates", "U programu", activeProgramCandidates.length],
-          ["invitations", "Pozivnice", invitations.length],
+          ["invitations", "Pozivnice", openInvitations.length],
         ].map(([id, label, count]) => (
           <button
             key={id}
@@ -911,15 +931,16 @@ export default function UsersSection({ openCandidateId = null, onOpened = () => 
                                 </button>
                               </div>
                             ) : (s.selectionDecision === "QUALIFIED" || Boolean(s.activationCode)) && !s.isRegistered && !s.registeredAt && s.status === "applying" ? (
-                              <button
-                                type="button"
-                                onClick={() => handleActivateCandidate(s)}
-                                className="inline-flex w-full items-center justify-center gap-1.5 rounded-lg bg-ink px-2.5 py-1.5 text-xs font-bold text-white hover:bg-ink transition-all cursor-pointer"
-                                title="Aktiviraj nalog odmah i prebaci kandidata u Fazu 1 (Aktivni kandidati)"
-                              >
-                                <CheckIcon className="h-3.5 w-3.5 text-white" />
-                                <span>Aktiviraj nalog (Prebaci u Fazu 1)</span>
-                              </button>
+                              <div className="space-y-1">
+                                <span className="block text-2xs text-ink-3">Pozivnica poslata, čeka registraciju</span>
+                                <button
+                                  type="button"
+                                  onClick={() => handleResendInvitation(s.email, s.activationCode)}
+                                  className="inline-flex items-center gap-1 rounded-lg border border-line-strong bg-white px-2 py-1 text-xs font-semibold text-ink hover:bg-surface-2"
+                                >
+                                  Pošalji pozivnicu ponovo
+                                </button>
+                              </div>
                             ) : (
                               <span className="text-2xs text-ink-3">
                                 Odluka doneta: {s.decidedAt ? new Date(s.decidedAt).toLocaleDateString() : "Danas"}
@@ -970,8 +991,13 @@ export default function UsersSection({ openCandidateId = null, onOpened = () => 
       {/* ================================================================ */}
       {activeTab === "invitations" && (
         <Card className="overflow-hidden">
+          {openInvitations.length === 0 && (
+            <p className="p-6 text-sm text-ink-3">
+              Nema pozivnica koje čekaju registraciju. Kad se kandidat registruje, pozivnica nestaje sa ove liste.
+            </p>
+          )}
           <ul className="divide-y divide-line">
-            {invitations.map((inv) => (
+            {openInvitations.map((inv) => (
               <li key={inv.code} className="flex flex-wrap items-center justify-between gap-4 p-5">
                 <div>
                   <div className="flex items-center gap-3">
@@ -985,40 +1011,17 @@ export default function UsersSection({ openCandidateId = null, onOpened = () => 
                     >
                       {copiedCode === inv.code ? "Kopirano" : "Kopiraj kod"}
                     </button>
-                    <Badge tone={inv.status === "registered" ? "green" : "amber"}>
-                      {inv.status === "registered" ? "Aktiviran nalog" : "Čeka registraciju"}
-                    </Badge>
-                    {inv.status !== "registered" && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const cand = students.find((s) => s.email?.toLowerCase() === (inv.email || "").toLowerCase());
-                          if (cand) {
-                            handleActivateCandidate(cand);
-                          } else {
-                            handleActivateCandidate({
-                              email: inv.email,
-                              name: inv.candidateName,
-                              packageName: inv.packageName,
-                              packageId: inv.packageId,
-                              activationCode: inv.code,
-                              finalPrice: inv.finalPrice,
-                            });
-                          }
-                        }}
-                        className="rounded-lg border border-line bg-white px-2 py-1 text-2xs font-semibold text-emerald-700 transition-colors hover:bg-surface"
-                        title="Aktiviraj nalog odmah i prebaci kandidata u aktivne kandidate (Faze 1-3)"
-                      >
-                        Aktiviraj odmah
-                      </button>
-                    )}
+                    <Badge tone="amber">Čeka registraciju</Badge>
                     <button
                       type="button"
-                      onClick={() => handleResetInvitation(inv.code)}
-                      className="rounded-lg border border-line bg-white px-2 py-1 text-2xs font-semibold text-amber-700 transition-colors hover:bg-surface"
-                      title="Resetuj kod na 'Čeka registraciju' i omogući ponovnu aktivaciju"
+                      onClick={async () => {
+                        const res = await resendInvitationEmail(inv.code);
+                        setSuccessToast(res.ok ? `Pozivnica je ponovo poslata na ${inv.email}.` : res.message);
+                        setTimeout(() => setSuccessToast(""), 4500);
+                      }}
+                      className="rounded-lg border border-line bg-white px-2 py-1 text-2xs font-semibold text-ink transition-colors hover:bg-surface"
                     >
-                      ↻ Resetuj kod
+                      Pošalji mejl ponovo
                     </button>
                   </div>
                   <p className="mt-1 text-sm font-semibold text-ink">
@@ -1186,6 +1189,7 @@ export default function UsersSection({ openCandidateId = null, onOpened = () => 
         <CandidateApplicationModal
           candidate={selectedCandidate}
           onSave={handleSaveCandidate}
+          onSaved={handleCandidateSaved}
           onClose={() => setSelectedCandidate(null)}
         />
       )}
@@ -1226,7 +1230,6 @@ export default function UsersSection({ openCandidateId = null, onOpened = () => 
         <ProfileReadinessModal
           candidate={selectedReadinessCandidate}
           onSave={handleApproveReadiness}
-          onActivateDirectly={(cand) => handleActivateCandidate(cand)}
           onClose={() => setSelectedReadinessCandidate(null)}
         />
       )}

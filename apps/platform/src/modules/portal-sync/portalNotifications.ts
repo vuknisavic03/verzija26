@@ -10,6 +10,7 @@ import {
   renderAgencyNotice,
   renderCandidateNotice,
   type RenderedNotice,
+  renderInvitation,
 } from './portalNotificationRules.ts'
 
 /**
@@ -25,18 +26,38 @@ function agencyAddress(replyTo: string) {
   return process.env.AGENCY_NOTIFICATION_EMAIL?.trim() || replyTo
 }
 
-async function deliver(to: string, notice: RenderedNotice, key: string, kind: string) {
+/** Šalje jedan mejl; vraća true ako je predat provajderu (ili zabeležen u capture režimu). */
+/** Lokalni razvoj bez slanja mejlova (capture): linkovi mogu da se prikažu direktno u aplikaciji. */
+export function localEmailPreview() {
+  if (process.env.NODE_ENV === 'production') return false
+  return createCandidateEmailProvider(readPlatformEnvironment().candidateCommunication).name === 'capture'
+}
+
+export async function deliverPortalEmail(
+  to: string,
+  notice: RenderedNotice,
+  key: string,
+  kind: string,
+  attachments?: Array<{ content: string; filename: string }>,
+) {
   const environment = readPlatformEnvironment().candidateCommunication
   const provider = createCandidateEmailProvider(environment)
   try {
     await provider.send({
+      attachments,
       idempotencyKey: key.slice(0, 250),
       message: notice as unknown as RenderedCandidateMessage,
       recipientEmail: to,
     })
-    if (provider.name === 'capture') console.info(`Portal email captured (${kind}).`)
+    if (provider.name === 'capture') {
+      console.info(`Portal email captured (${kind}).`)
+      // Samo u lokalnom razvoju: ceo tekst (sa linkovima) u terminal, da se tok može proći bez slanja.
+      if (process.env.NODE_ENV !== 'production') console.info(`--- ${notice.subject}\n${notice.text}\n---`)
+    }
+    return true
   } catch (error) {
     console.error(`Portal email failed (${kind}).`, error instanceof Error ? error.message : 'UNKNOWN_ERROR')
+    return false
   }
 }
 
@@ -59,7 +80,7 @@ export function notifyCandidate(candidate: Candidate, notice: Notice<CandidateNo
   if (!email) return
   const rendered = renderCandidateNotice(notice, { firstName: firstName(candidate), portalUrl: `${publicSiteUrl()}/profil` })
   const key = `portal:${notice.kind}:${String(candidate.id)}:${notice.details.invoiceNumber || notice.details.document || ''}:${minuteBucket()}`
-  void deliver(email, rendered, key, notice.kind)
+  void deliverPortalEmail(email, rendered, key, notice.kind)
 }
 
 /** Agencija sačuvala dosije: obavesti kandidata o promenama koje ga se tiču. */
@@ -80,6 +101,25 @@ export function notifyAgencyChanges(before: Candidate | null, after: Candidate) 
       candidateName: fullName(after),
     })
     const key = `portal-agency:${notice.kind}:${String(after.id)}:${notice.details.installment || ''}:${minuteBucket()}`
-    void deliver(to, rendered, key, notice.kind)
+    void deliverPortalEmail(to, rendered, key, notice.kind)
   }
+}
+
+/** Pozivnica kandidatu (kod + link za registraciju). Čeka se, da agencija vidi da li je mejl otišao. */
+export async function sendInvitationEmail(invitation: {
+  candidateName?: string
+  code: string
+  email: string
+  finalPrice?: number
+  packageName?: string
+}) {
+  const rendered = renderInvitation({
+    candidateName: invitation.candidateName || '',
+    code: invitation.code,
+    email: invitation.email,
+    finalPrice: Number(invitation.finalPrice) || 0,
+    packageName: invitation.packageName || 'Work & Travel USA',
+    siteUrl: publicSiteUrl(),
+  })
+  return deliverPortalEmail(invitation.email, rendered, `portal:invitation:${invitation.code}:${minuteBucket()}`, 'invitation')
 }

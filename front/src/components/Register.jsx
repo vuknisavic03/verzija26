@@ -1,21 +1,30 @@
 // front/src/components/Register.jsx
 // Glavni orkestrator za registraciju kandidata u 4 koraka
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useEffect } from "react";
 import { useTranslation } from "../i18n/LanguageContext";
 import {
   verifyInvitationWithBackend,
-  scanPassportWithBackend,
   registerCandidateWithBackend,
-  uploadDocumentWithBackend,
   getCandidates,
-  syncFromBackend,
+  resendVerificationEmail,
 } from "../data/candidateStore";
 import { RegisterStepper } from "./register/ui";
+import { Button } from "./ui";
 import Step1Activation from "./register/Step1Activation";
-import Step2PassportOcr from "./register/Step2PassportOcr";
+import Step2Documents from "./register/Step2Documents";
 import Step3PaymentGuarantor from "./register/Step3PaymentGuarantor";
 import Step4PreferencesJob from "./register/Step4PreferencesJob";
+
+/** Link iz mejla (pun URL) → putanja unutar aplikacije. */
+const devPath = (url) => {
+  try {
+    const parsed = new URL(url);
+    return parsed.pathname + parsed.search;
+  } catch {
+    return url;
+  }
+};
 
 export default function Register({
   onSubmit = () => {},
@@ -34,25 +43,30 @@ export default function Register({
   const [code, setCode] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState("");
   const [matchedInvitation, setMatchedInvitation] = useState(null);
   const [codeError, setCodeError] = useState("");
+  // Nalog za ovaj email je već aktiviran: student se vraća samo prijavom, bez koda.
+  const [activeAccountEmail, setActiveAccountEmail] = useState("");
+  // Posle registracije: nalog čeka potvrdu emaila (link iz mejla).
+  const [registeredEmail, setRegisteredEmail] = useState("");
+  const [devLink, setDevLink] = useState("");
+  const [resendState, setResendState] = useState({ busy: false, message: "" });
 
   // Korak 2 stanja (Pasoš & OCR)
-  const [passportImage, setPassportImage] = useState(null);
-  const [passportFileName, setPassportFileName] = useState("");
-  const [passportFileUrl, setPassportFileUrl] = useState("");
+  // Slike dokumenata ({ dataUrl, fileName }) i podaci očitani sa njih (kandidat ih proverava).
+  const [docImages, setDocImages] = useState({ passport: null, idFront: null, idBack: null });
   const [ocrBirthDate, setOcrBirthDate] = useState("");
   const [ocrExpiryDate, setOcrExpiryDate] = useState("");
   const [ocrGender, setOcrGender] = useState("");
-  const [isScanning, setIsScanning] = useState(false);
-  const [scanCompleted, setScanCompleted] = useState(false);
-  const [ocrStatusMessage, setOcrStatusMessage] = useState("");
+  const [passportNumber, setPassportNumber] = useState("");
+  const [idCardExpiry, setIdCardExpiry] = useState("");
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
   const [phone, setPhone] = useState("");
   const [jmbg, setJmbg] = useState("");
   const [idCardNumber, setIdCardNumber] = useState("");
-  const passportInputRef = useRef(null);
 
   // Korak 3 stanja (Plaćanje & Jemac)
   const [paymentMethod, setPaymentMethod] = useState("now"); // now | installments | later
@@ -72,13 +86,23 @@ export default function Register({
   const [groupCode, setGroupCode] = useState("");
 
   useEffect(() => {
-    syncFromBackend();
     if (typeof window !== "undefined") {
       const params = new URLSearchParams(window.location.search);
       const ref = params.get("ref") || params.get("refCode") || params.get("referral");
       if (ref) setReferredBy(ref.trim().toUpperCase());
       const grp = params.get("group") || params.get("groupCode");
       if (grp) setGroupCode(grp.trim().toUpperCase());
+      // Link iz mejla sa pozivnicom: email i kod su već upisani.
+      const invitedEmail = params.get("email");
+      const invitedCode = params.get("kod") || params.get("code");
+      if (invitedEmail) setEmail(invitedEmail.trim());
+      if (invitedCode) setCode(invitedCode.trim().toUpperCase());
+      // Ponovo otvoren link iz pozivnice posle aktivacije vodi pravo na prijavu.
+      if (invitedEmail && invitedCode) {
+        verifyInvitationWithBackend(invitedEmail.trim(), invitedCode.trim()).then((res) => {
+          if (res.alreadyActive) setActiveAccountEmail(invitedEmail.trim().toLowerCase());
+        });
+      }
     }
   }, []);
 
@@ -130,6 +154,11 @@ export default function Register({
     }
 
     const res = await verifyInvitationWithBackend(email, code);
+    if (res.alreadyActive) {
+      setActiveAccountEmail(email.trim().toLowerCase());
+      setMatchedInvitation(null);
+      return null;
+    }
     if (!res.valid) {
       setCodeError(res.error);
       setMatchedInvitation(null);
@@ -143,8 +172,12 @@ export default function Register({
   // Korak 1 nastavak
   const handleStep1Submit = async (e) => {
     e.preventDefault();
+    if (password.length < 12) {
+      setCodeError("Lozinka mora imati najmanje 12 znakova.");
+      return;
+    }
     if (password !== confirmPassword) {
-      alert(t("auth.passwordMismatch") || "Lozinke se ne poklapaju.");
+      setCodeError(t("auth.passwordMismatch") || "Lozinke se ne poklapaju.");
       return;
     }
 
@@ -162,109 +195,36 @@ export default function Register({
     setStep(2);
   };
 
-  const formatMrzName = (val) => {
-    if (!val) return "";
-    const lower = String(val).trim().toLowerCase();
-    return lower.charAt(0).toUpperCase() + lower.slice(1);
-  };
-
-  const applyOcrResponse = (ocrRes) => {
-    setIsScanning(false);
-    setScanCompleted(true);
-
-    if (ocrRes?.previewDataUrl) {
-      setPassportImage(ocrRes.previewDataUrl);
-    }
-
-    const ext = ocrRes?.extracted;
-    if (ext) {
-      if (ext.firstName) setFirstName(formatMrzName(ext.firstName));
-      if (ext.lastName) setLastName(formatMrzName(ext.lastName));
-      const extractedJmbg = ext.personalNumber || ext.visualFields?.jmbg;
-      if (extractedJmbg && /^\d{13}$/.test(extractedJmbg)) {
-        setJmbg(extractedJmbg);
-      }
-      const docNum = ext.documentNumber || ext.visualFields?.passportNumber;
-      if (docNum) {
-        setIdCardNumber(docNum);
-      }
-      if (ext.birthDate) {
-        setOcrBirthDate(ext.birthDate);
-      }
-      if (ext.expirationDate) {
-        setOcrExpiryDate(ext.expirationDate);
-      }
-      if (ext.sex === "F") {
-        setOcrGender("Ženski");
-      } else if (ext.sex === "M") {
-        setOcrGender("Muški");
-      }
-      const confStr = ocrRes.confidence ? ` (pouzdanost OCR očitavanja: ${ocrRes.confidence}%)` : "";
-      setOcrStatusMessage(
-        `${ocrRes.message || "Pasoš je očitan."}${confStr}`
-      );
-    } else {
-      if (!firstName && matchedInvitation?.candidateName) {
-        setFirstName(matchedInvitation.candidateName.split(" ")[0]);
-      }
-      if (!lastName && matchedInvitation?.candidateName) {
-        setLastName(matchedInvitation.candidateName.split(" ").slice(1).join(" "));
-      }
-      setOcrStatusMessage(ocrRes?.message || "Fotografija pasoša je učitana. Proveri i potvrdi podatke ispod.");
-    }
-  };
-
-  // Pravi upload pasoša i pozivanje backend Tesseract + MRZ OCR-a
-  const handlePassportUpload = async (file) => {
-    if (!file) return;
-    setPassportFileName(file.name || "Sken_Pasosa.png");
-    const reader = new FileReader();
-    reader.onload = () => {
-      setPassportImage(reader.result);
-    };
-    reader.readAsDataURL(file);
-
-    setIsScanning(true);
-    setScanCompleted(false);
-    setOcrStatusMessage("");
-
-    // Sačuvaj fajl pasoša u dokumentima kandidata
-    const targetEmail = (matchedInvitation?.email || email || "").trim().toLowerCase();
-    uploadDocumentWithBackend(file, "passport", targetEmail)
-      .then((res) => {
-        if (res?.fileUrl) setPassportFileUrl(res.fileUrl);
-      })
-      .catch(() => {});
-
-    const ocrRes = await scanPassportWithBackend({ file });
-    applyOcrResponse(ocrRes);
-  };
-
-  const runSamplePassportOcr = async () => {
-    setIsScanning(true);
-    setScanCompleted(false);
-    setOcrStatusMessage("");
-    setPassportFileName("Sken_Pasosa_OCR.png");
-
-    const ocrRes = await scanPassportWithBackend({
-      sample: true,
-      candidateName: matchedInvitation?.candidateName || `${firstName} ${lastName}`.trim() || "Luka Jovanović",
-    });
-    applyOcrResponse(ocrRes);
-  };
-
   // Korak 2 nastavak
+  // Provere (dokumenti, JMBG, brojevi) radi sam korak 2.
   const handleStep2Submit = (e) => {
     e.preventDefault();
-    if (!passportImage) {
-      alert(t("reg.passportUpload"));
-      return;
-    }
-    if (!firstName.trim() || !lastName.trim() || !jmbg.trim() || !idCardNumber.trim()) {
-      alert(t("reg.passportExtractSuccess"));
-      return;
-    }
     setStep(3);
+  };
+
+  const identityValues = {
+    birthDate: ocrBirthDate,
+    firstName,
+    idCardExpiry,
+    idCardNumber,
+    jmbg,
+    lastName,
+    passportExpiry: ocrExpiryDate,
+    passportNumber,
+    phone,
+    sex: ocrGender === "Ženski" ? "F" : ocrGender === "Muški" ? "M" : "",
+  };
+  const setIdentityValues = (patch) => {
+    if ("birthDate" in patch) setOcrBirthDate(patch.birthDate);
+    if ("firstName" in patch) setFirstName(patch.firstName);
+    if ("idCardExpiry" in patch) setIdCardExpiry(patch.idCardExpiry);
+    if ("idCardNumber" in patch) setIdCardNumber(patch.idCardNumber);
+    if ("jmbg" in patch) setJmbg(patch.jmbg);
+    if ("lastName" in patch) setLastName(patch.lastName);
+    if ("passportExpiry" in patch) setOcrExpiryDate(patch.passportExpiry);
+    if ("passportNumber" in patch) setPassportNumber(patch.passportNumber);
+    if ("phone" in patch) setPhone(patch.phone);
+    if ("sex" in patch) setOcrGender(patch.sex === "F" ? "Ženski" : patch.sex === "M" ? "Muški" : "");
   };
 
   // Korak 3 nastavak
@@ -288,10 +248,8 @@ export default function Register({
       (c) => c.email && c.email.toLowerCase() === verifiedEmail
     );
     const resolvedPhone = phone.trim() || existingPreApp?.phone || "";
-    const resolvedPassportFileName =
-      passportFileName ||
-      existingPreApp?.passportScanFileName ||
-      (passportImage ? "Sken_Pasosa_OCR.png" : "");
+    const passportImage = docImages.passport?.dataUrl || "";
+    const resolvedPassportFileName = docImages.passport?.fileName || existingPreApp?.passportScanFileName || "";
 
     const candidateProfile = {
       id: existingPreApp?.id && !String(existingPreApp.id).startsWith("preapp-")
@@ -304,11 +262,16 @@ export default function Register({
       phone: resolvedPhone,
       jmbg: jmbg.trim(),
       idCardNumber: idCardNumber.trim(),
-      passportNumber: idCardNumber.trim(),
+      idCardExpiryDate: idCardExpiry || "",
+      idCardFrontDataUrl: docImages.idFront?.dataUrl || undefined,
+      idCardFrontFileName: docImages.idFront?.fileName || undefined,
+      idCardBackDataUrl: docImages.idBack?.dataUrl || undefined,
+      idCardBackFileName: docImages.idBack?.fileName || undefined,
+      passportNumber: passportNumber.trim(),
       passportImage,
       passportScanFileName: resolvedPassportFileName,
       passportScanDataUrl: passportImage || existingPreApp?.passportScanDataUrl || "",
-      passportScanUrl: passportFileUrl || existingPreApp?.passportScanUrl || "",
+      passportScanUrl: existingPreApp?.passportScanUrl || "",
       birthDate: ocrBirthDate || existingPreApp?.birthDate || "",
       passportExpiryDate: ocrExpiryDate || existingPreApp?.passportExpiryDate || "",
       gender: ocrGender || existingPreApp?.gender || "",
@@ -354,9 +317,99 @@ export default function Register({
       createdAt: existingPreApp?.createdAt || new Date().toISOString(),
     };
 
-    const saved = await registerCandidateWithBackend(candidateProfile);
-    onSubmit(saved);
+    setSubmitError("");
+    setSubmitting(true);
+    const result = await registerCandidateWithBackend({ ...candidateProfile, password });
+    if (!result.ok) {
+      setSubmitting(false);
+      setSubmitError(result.error);
+      return;
+    }
+    // Nalog je napravljen, ali se aktivira tek potvrdom emaila (link iz mejla).
+    setSubmitting(false);
+    setRegisteredEmail(result.email || verifiedEmail);
+    setDevLink(result.devVerificationUrl || "");
+    setPassword("");
+    setConfirmPassword("");
+    window.scrollTo?.({ top: 0 });
   };
+
+  const resendVerification = async () => {
+    if (resendState.busy) return;
+    setResendState({ busy: true, message: "" });
+    const res = await resendVerificationEmail(registeredEmail);
+    if (res.devVerificationUrl) setDevLink(res.devVerificationUrl);
+    setResendState({ busy: false, message: res.message });
+  };
+
+  if (activeAccountEmail) {
+    const loginWithEmail = `${loginHref}?email=${encodeURIComponent(activeAccountEmail)}`;
+    return (
+      <section className="bg-surface px-5 py-14 sm:py-20">
+        <div className="mx-auto w-full max-w-md rounded-3xl border border-line bg-white p-7 sm:p-10">
+          <h1 className="font-display text-3xl font-bold text-ink">Nalog je već aktiviran</h1>
+          <p className="mt-4 text-[15px] leading-relaxed text-ink-2">
+            Nalog za <span className="font-medium text-ink">{activeAccountEmail}</span> je aktivan. Kod iz pozivnice ti
+            više ne treba — prijavi se emailom i lozinkom.
+          </p>
+          <Button href={loginWithEmail} onClick={go(loginWithEmail)} size="lg" block className="mt-7">
+            Prijavi se
+          </Button>
+          <p className="mt-4 text-center text-sm text-ink-2">
+            Ne sećaš se lozinke?{" "}
+            <a href="/zaboravljena-lozinka" onClick={go("/zaboravljena-lozinka")} className="font-medium text-ink underline underline-offset-4">
+              Postavi novu
+            </a>
+          </p>
+        </div>
+      </section>
+    );
+  }
+
+  if (registeredEmail) {
+    return (
+      <section className="bg-surface px-5 py-14 sm:py-20">
+        <div className="mx-auto w-full max-w-md rounded-3xl border border-line bg-white p-7 sm:p-10">
+          <h1 className="font-display text-3xl font-bold text-ink">Proveri email</h1>
+          <p className="mt-4 text-[15px] leading-relaxed text-ink-2">
+            Poslali smo ti mejl na <span className="font-medium text-ink">{registeredEmail}</span>. Otvori link iz
+            mejla da potvrdiš adresu, pa se prijavi lozinkom koju si upravo izabrao.
+          </p>
+          <p className="mt-3 text-[15px] leading-relaxed text-ink-2">Link važi 48 sati.</p>
+          {devLink && (
+            <div className="mt-6 rounded-xl border border-dashed border-line px-4 py-3 text-sm leading-relaxed text-ink-2">
+              Lokalni razvoj: mejlovi se ne šalju, pa je link iz mejla ovde.
+              <Button href={devPath(devLink)} onClick={go(devPath(devLink))} size="md" block className="mt-3">
+                Potvrdi email
+              </Button>
+            </div>
+          )}
+          <div className="mt-6 rounded-xl bg-surface px-4 py-3 text-sm leading-relaxed text-ink-2">
+            Mejl ne stiže? Proveri Spam i Promocije.{" "}
+            {resendState.message ? (
+              <span role="status" className="text-ink">{resendState.message}</span>
+            ) : (
+              <button
+                type="button"
+                onClick={resendVerification}
+                disabled={resendState.busy}
+                className="font-medium text-ink underline underline-offset-4 disabled:opacity-60"
+              >
+                {resendState.busy ? "Šaljem…" : "Pošalji ponovo"}
+              </button>
+            )}
+          </div>
+          <a
+            href={loginHref}
+            onClick={go(loginHref)}
+            className="mt-8 block text-center text-sm text-ink-2 underline-offset-4 hover:text-ink hover:underline"
+          >
+            Već sam potvrdio, idem na prijavu
+          </a>
+        </div>
+      </section>
+    );
+  }
 
   return (
     <section className="bg-surface px-5 py-14 sm:py-20">
@@ -386,24 +439,13 @@ export default function Register({
           )}
 
           {step === 2 && (
-            <Step2PassportOcr
-              passportImage={passportImage}
-              isScanning={isScanning}
-              scanCompleted={scanCompleted}
-              ocrStatusMessage={ocrStatusMessage}
-              firstName={firstName}
-              setFirstName={setFirstName}
-              lastName={lastName}
-              setLastName={setLastName}
-              phone={phone}
-              setPhone={setPhone}
-              jmbg={jmbg}
-              setJmbg={setJmbg}
-              idCardNumber={idCardNumber}
-              setIdCardNumber={setIdCardNumber}
-              passportInputRef={passportInputRef}
-              onPassportUpload={handlePassportUpload}
-              onRunSampleOcr={runSamplePassportOcr}
+            <Step2Documents
+              email={(matchedInvitation?.email || email).trim().toLowerCase()}
+              code={matchedInvitation?.code || code.trim().toUpperCase()}
+              values={identityValues}
+              onChange={setIdentityValues}
+              images={docImages}
+              onImages={(patch) => setDocImages((prev) => ({ ...prev, ...patch }))}
               onBack={() => setStep(1)}
               onSubmit={handleStep2Submit}
               t={t}
@@ -445,6 +487,8 @@ export default function Register({
               setGroupCode={setGroupCode}
               onBack={() => setStep(3)}
               onSubmit={handleStep4Submit}
+              submitting={submitting}
+              submitError={submitError}
               t={t}
             />
           )}

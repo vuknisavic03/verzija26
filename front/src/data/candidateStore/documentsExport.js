@@ -80,16 +80,13 @@ export function openPrintableContractWindow({ id, email, type = "all", extraPara
     `${candidate.firstName || ""} ${candidate.lastName || ""}`.trim() ||
     candidate.name ||
     "Student Kandidat";
-  const jmbg = extraParams?.jmbg || candidate.jmbg || "1508001710023";
-  const passportNumber =
-    extraParams?.passportNumber ||
-    candidate.passportNumber ||
-    candidate.idCardNumber ||
-    "010948212";
+  // Podaci koji fale ostaju kao linija za ručni upis — nikad se ne izmišljaju.
+  const jmbg = extraParams?.jmbg || candidate.jmbg || "________________";
+  const passportNumber = extraParams?.passportNumber || candidate.passportNumber || "________________";
   const contractNumber = `AA-2027-${String(candidate.id || "1042").replace(/[^0-9]/g, "").slice(-4) || "1042"}`;
-  const address = candidate.address || candidate.studyCity || "Beograd, Srbija";
-  const phone = candidate.phone || "+381 60 1234567";
-  const candidateEmail = candidate.email || "student@example.com";
+  const address = candidate.address || "________________";
+  const phone = candidate.phone || "________________";
+  const candidateEmail = candidate.email || "________________";
 
   const isSelf =
     String(candidate.packageId || "").toLowerCase().includes("self") ||
@@ -298,8 +295,8 @@ export function openPrintableConsentWindow({ id, email } = {}) {
     ) || getCurrentUser() || {};
 
   const candidateName = `${candidate.firstName || ""} ${candidate.lastName || ""}`.trim() || candidate.name || "Kandidat";
-  const jmbg = candidate.jmbg || "1508001710023";
-  const passportNumber = candidate.passportNumber || candidate.idCardNumber || "010948212";
+  const jmbg = candidate.jmbg || "";
+  const passportNumber = candidate.passportNumber || "";
 
   const win = window.open("", "_blank");
   if (!win) {
@@ -523,7 +520,7 @@ export function openPrintablePaymentSlipWindow({ id, email, type = "rate2", cust
           <div class="field-label">Uplatilac</div>
           <div class="field-box" style="height: 55px;">
             ${candidateName}<br>
-            ${candidate.address || candidate.homeAddress || candidate.studyCity || "Srbija"}<br>
+            ${candidate.address || candidate.homeAddress || "________________"}<br>
             Student SWT 2026 / 2027
           </div>
         </div>

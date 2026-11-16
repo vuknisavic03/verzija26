@@ -30,6 +30,12 @@ describe('portal notification rules', () => {
     expect(candidateNoticesFor(null, { contractVerificationStatus: 'rejected' })[0]!.kind).toBe('contractRejected')
   })
 
+  it('notifies the agency once per uploaded signed contract', () => {
+    const uploaded = { signedContractUploadedAt: '2026-11-16T12:00:00.000Z' }
+    expect(agencyNoticesFor({}, uploaded).map((n) => n.kind)).toEqual(['contractUploaded'])
+    expect(agencyNoticesFor(uploaded, uploaded)).toEqual([])
+  })
+
   it('notifies the agency when a dossier is submitted or a payment is reported, once', () => {
     const submitted = { documentsSubmittedForReview: true, documentsVerificationStatus: 'pending' }
     expect(agencyNoticesFor({}, submitted).map((n) => n.kind)).toEqual(['dossierSubmitted'])

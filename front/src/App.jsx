@@ -27,6 +27,7 @@ const Contact = lazy(() => import("./components/Contact"));
 const Login = lazy(() => import("./components/Login"));
 const ForgotPassword = lazy(() => import("./components/ForgotPassword"));
 const ResetPassword = lazy(() => import("./components/ResetPassword"));
+const VerifyEmail = lazy(() => import("./components/VerifyEmail"));
 const Register = lazy(() => import("./components/Register"));
 const OnlinePrijava = lazy(() => import("./components/OnlinePrijava"));
 const Dashboard = lazy(() => import("./components/Dashboard"));
@@ -50,6 +51,7 @@ const TITLES = {
   "/prijava": "Prijava na nalog",
   "/zaboravljena-lozinka": "Zaboravljena lozinka",
   "/nova-lozinka": "Nova lozinka",
+  "/potvrda-emaila": "Potvrda emaila",
   "/registracija": "Aktivacija naloga",
   "/prijava-online": "Online prijava",
   "/nalog": "Moj profil",
@@ -165,7 +167,9 @@ export default function App() {
       navigateTo("/profil");
       return { success: true };
     }
-    if (candidate.status === 429 || candidate.status === 0) return { success: false, error: candidate.error };
+    // Zaključan nalog kandidata: ne pokušavaj prijavu agencije, njena poruka bi sakrila pravi razlog.
+    if (candidate.locked || candidate.status === 429 || candidate.status === 0) return { success: false, error: candidate.error };
+    if (candidate.unverified) return { success: false, error: candidate.error, unverified: true, email };
 
     // 2) Agencija
     const admin = await loginAdmin(email, password);
@@ -215,12 +219,13 @@ export default function App() {
     navigateTo("/profil");
   };
 
-  const handleLogout = async () => {
+  const handleLogout = async (next = "/prijava") => {
     setIsAdmin(false);
     setCurrentCandidate(null);
     writeAdminSession(false);
     portalSynced.current = false;
-    navigateTo("/");
+    // Posle odjave student se vraća samo prijavom (email + lozinka), bez koda.
+    navigateTo(typeof next === "string" ? next : "/prijava");
     await logoutSession();
   };
 
@@ -335,6 +340,15 @@ export default function App() {
         return <Contact />;
       case "/zaboravljena-lozinka":
         return <ForgotPassword onNavigate={handleNavigate} loginHref="/prijava" />;
+      case "/potvrda-emaila":
+        return (
+          <VerifyEmail
+            onNavigate={handleNavigate}
+            loginHref="/prijava"
+            signedInAs={isAdmin ? "admin" : currentCandidate ? "candidate" : ""}
+            onSwitchAccount={handleLogout}
+          />
+        );
       case "/nova-lozinka":
         return <ResetPassword onNavigate={handleNavigate} loginHref="/prijava" forgotHref="/zaboravljena-lozinka" />;
       case "/registracija":

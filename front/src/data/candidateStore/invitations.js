@@ -78,13 +78,26 @@ export function resetInvitation(code) {
   return null;
 }
 
-export function createInvitation({ email, candidateName, packageId, discount = 0, discountNote = "" }) {
+const CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
+
+/** Isti format kao na serveru (AA-XXXX-XXXX); konačan kod uvek dodeljuje server. */
+function generateInvitationCode() {
+  const bytes = new Uint32Array(8);
+  crypto.getRandomValues(bytes);
+  const chars = Array.from(bytes, (n) => CODE_ALPHABET[n % CODE_ALPHABET.length]).join("");
+  return `AA-${chars.slice(0, 4)}-${chars.slice(4)}`;
+}
+
+/**
+ * Pravi pozivnicu na serveru; server šalje kandidatu mejl sa kodom i linkom za registraciju.
+ * Vraća { ok, invitation, emailSent, error }.
+ */
+export async function createInvitation({ email, candidateName, packageId, discount = 0, discountNote = "" }) {
   const pkg = PROGRAM_PACKAGES.find((p) => p.id === packageId) || PROGRAM_PACKAGES[0];
   const discNum = Math.max(0, Number(discount) || 0);
   const finalPrice = Math.max(0, pkg.basePrice - discNum);
 
-  const randomDigits = Math.floor(1000 + Math.random() * 9000);
-  const code = `WT-${randomDigits}`;
+  const code = generateInvitationCode();
 
   const newInv = {
     code,
@@ -100,22 +113,38 @@ export function createInvitation({ email, candidateName, packageId, discount = 0
     status: "pending",
   };
 
-  const list = getInvitations();
-  const updated = [newInv, ...list];
-  saveData(INVITATIONS_KEY, updated);
+  try {
+    const res = await fetch("/api/public/portal-state", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify({ action: "createInvitation", payload: newInv }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.invitation) {
+      return { ok: false, error: data.message || "Pozivnica nije sačuvana. Probaj ponovo." };
+    }
+    if (Array.isArray(data.invitations)) saveData(INVITATIONS_KEY, data.invitations);
+    return { ok: true, invitation: data.invitation, emailSent: Boolean(data.emailSent) };
+  } catch {
+    return { ok: false, error: "Nema veze sa serverom. Proveri internet i probaj ponovo." };
+  }
+}
 
-  // Sinhronizacija sa backendom
-  fetch("/api/public/portal-state", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    credentials: "include",
-    body: JSON.stringify({
-      action: "createInvitation",
-      payload: newInv,
-    }),
-  }).catch(() => {});
-
-  return newInv;
+/** Ponovo pošalji mejl sa pozivnicom (isti kod). */
+export async function resendInvitationEmail(code) {
+  try {
+    const res = await fetch("/api/public/portal-state", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify({ action: "resendInvitation", payload: { code } }),
+    });
+    const data = await res.json().catch(() => ({}));
+    return { ok: res.ok, message: data.message || (res.ok ? "Pozivnica je ponovo poslata." : "Mejl nije poslat.") };
+  } catch {
+    return { ok: false, message: "Nema veze sa serverom." };
+  }
 }
 
 export function validateInvitationForRegistration(email, code) {
@@ -198,7 +227,10 @@ export async function verifyInvitationWithBackend(email, code) {
     if (res.ok && data?.valid) {
       return { valid: true, invitation: data.invitation };
     }
-    // Proveri lokalni keš pre odbijanja (fallback ako je kod kreiran lokalno ili je server prijavio grešku)
+    // Server je odlučio (kod ne postoji, iskorišćen je ili je nalog već aktiviran): lokalni keš to ne sme da pregazi.
+    if (data && res.status < 500) {
+      return { valid: false, alreadyActive: Boolean(data.alreadyActive), error: data.message || "Kod nije ispravan." };
+    }
     const local = validateInvitationForRegistration(email, code);
     if (local.valid) {
       return local;
@@ -219,74 +251,66 @@ export async function verifyInvitationWithBackend(email, code) {
 }
 
 /**
- * Poziva pravi backend OCR servis (/api/public/passport-ocr) koji koristi Tesseract.js + Sharp + MRZ parser.
+ * Automatsko očitavanje pasoša ili lične karte (1–2 slike). Pre registracije se šalju email i kod
+ * iz pozivnice. Vraća { ok, fields, warnings, mrzValid } ili { ok: false, message }.
  */
-export async function scanPassportWithBackend({ file, sample = false, candidateName = "" }) {
+export async function scanIdentityDocument({ kind, files, email, code }) {
   try {
-    let res;
-    if (sample) {
-      res = await fetch("/api/public/passport-ocr", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({ sample: true, candidateName }),
-      });
-    } else if (file) {
-      const formData = new FormData();
-      formData.append("passport", file);
-      res = await fetch("/api/public/passport-ocr", {
-        method: "POST",
-        credentials: "include",
-        body: formData,
-      });
-    } else {
-      return { success: false, message: "Nije izabran fajl." };
+    const form = new FormData();
+    form.append("kind", kind);
+    if (email) form.append("email", email);
+    if (code) form.append("code", code);
+    for (const file of files) form.append("files", file);
+    const res = await fetch("/api/public/identity-scan", { method: "POST", body: form, credentials: "include" });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      return {
+        ok: false,
+        message:
+          res.status === 429
+            ? "Previše pokušaja. Sačekaj nekoliko minuta ili upiši podatke ručno."
+            : data.message || "Očitavanje nije uspelo. Upiši podatke ručno.",
+      };
     }
-
-    const data = await res.json();
-    return data;
+    return { ok: true, fields: data.fields || {}, mrzValid: Boolean(data.mrzValid), warnings: data.warnings || [] };
   } catch {
-    return {
-      success: false,
-      message: "Backend OCR servis trenutno nije dostupan.",
-    };
+    return { ok: false, message: "Nema veze sa serverom. Proveri internet ili upiši podatke ručno." };
   }
 }
 
 /**
- * Registruje kandidata na backendu (/api/public/candidate-accounts/register) i ažurira lokalni store.
+ * Registruje kandidata na backendu (/api/public/candidate-accounts/register): pravi nalog sa
+ * lozinkom i profil. Bez lokalne rezerve — nalog postoji samo ako ga je server napravio.
+ * Vraća { ok, candidate } ili { ok: false, error }.
  */
 export async function registerCandidateWithBackend(candidatePayload) {
   const registeredAt = candidatePayload.registeredAt || new Date().toISOString();
-  const targetId = candidatePayload.id && !String(candidatePayload.id).startsWith("preapp-")
-    ? candidatePayload.id
-    : `cand-${Date.now()}`;
-
-  const payloadWithFlag = {
-    ...candidatePayload,
-    id: targetId,
-    status: candidatePayload.status === "applying" ? "review" : (candidatePayload.status || "review"),
-    progress: Math.max(candidatePayload.progress || 0, 40),
-    isRegistered: true,
-    registeredAt,
-  };
   try {
     const res = await fetch("/api/public/candidate-accounts/register", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       credentials: "include",
-      body: JSON.stringify(payloadWithFlag),
+      body: JSON.stringify({ ...candidatePayload, registeredAt }),
     });
-    if (res.ok) {
-      const data = await res.json();
-      if (data.candidate) {
-        return saveCandidate({ ...payloadWithFlag, ...data.candidate, isRegistered: true, registeredAt }, { skipRemoteSync: true });
-      }
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      if (res.status === 429) return { ok: false, error: "Previše pokušaja. Sačekaj 15 minuta pa probaj ponovo." };
+      return { ok: false, error: data?.message || "Registracija nije uspela. Probaj ponovo." };
     }
+    const candidate = data.candidate
+      ? saveCandidate({ ...data.candidate, isRegistered: true, registeredAt }, { skipRemoteSync: true })
+      : null;
+    return {
+      ok: true,
+      candidate,
+      email: data.email || "",
+      verificationRequired: Boolean(data.verificationRequired),
+      // Samo lokalno, kad se mejlovi ne šalju: link iz mejla za potvrdu.
+      devVerificationUrl: data.devVerificationUrl || "",
+    };
   } catch {
-    // Fallback na lokalni upis
+    return { ok: false, error: "Nema veze sa serverom. Proveri internet i probaj ponovo." };
   }
-  return saveCandidate(payloadWithFlag);
 }
 
 export function findInvitation(email, code) {

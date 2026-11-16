@@ -86,9 +86,10 @@ export async function renderResponsibilityStatementPdf(input: ResponsibilityStat
   const fontBytes = await loadFontBytes()
   const font = await pdf.embedFont(fontBytes, { subset: true })
 
-  const candidateName = input.candidateName.trim() || 'Student Kandidat'
-  const jmbg = input.jmbg.trim() || '1508001710023'
-  const passportNumber = input.passportNumber.trim() || '010948212'
+  // Podatak koji fali ostaje kao linija za ručni upis — nikad se ne izmišlja.
+  const candidateName = input.candidateName.trim() || '________________________'
+  const jmbg = input.jmbg.trim() || '_____________'
+  const passportNumber = input.passportNumber.trim() || '_____________'
   const issueDate = input.date || new Date()
   const contractNumber = input.contractNumber || 'AA-2026'
 

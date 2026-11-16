@@ -79,7 +79,16 @@ async function postJson(url, body) {
   }
 }
 
+// Posle 5 pogrešnih lozinki Payload zaključa nalog na 15 minuta i tada odbija i tačnu lozinku (401).
+const LOCKED_MESSAGE =
+  "Nalog je privremeno zaključan posle 5 pogrešnih pokušaja. Sačekaj 15 minuta ili postavi novu lozinku preko „Zaboravljena lozinka\" — to ga odmah otključava.";
+
+function isLocked(res) {
+  return (res.data?.errors || []).some((e) => /locked/i.test(String(e?.message || "")));
+}
+
 function loginError(status) {
+  if (status === 403) return "Email još nije potvrđen. Otvori link iz mejla koji smo ti poslali posle registracije.";
   if (status === 429) return "Previše pokušaja. Sačekaj 15 minuta pa probaj ponovo.";
   if (status === 0) return "Nema veze sa serverom. Proveri internet i probaj ponovo.";
   return "Email ili lozinka nisu tačni.";
@@ -91,7 +100,9 @@ export async function loginCandidate(email, password) {
     email: String(email || "").trim().toLowerCase(),
     password,
   });
-  if (!res.ok) return { ok: false, status: res.status, error: loginError(res.status) };
+  // 403 dolazi samo uz tačnu lozinku, kad email još nije potvrđen.
+  if (!res.ok && isLocked(res)) return { ok: false, status: res.status, locked: true, error: LOCKED_MESSAGE };
+  if (!res.ok) return { ok: false, status: res.status, unverified: res.status === 403, error: loginError(res.status) };
   const data = await syncFromBackend();
   const candidate = data?.candidate || null;
   if (candidate) setCurrentUser(candidate);
@@ -104,6 +115,7 @@ export async function loginAdmin(email, password) {
     email: String(email || "").trim().toLowerCase(),
     password,
   });
+  if (!res.ok && isLocked(res)) return { ok: false, status: res.status, locked: true, error: LOCKED_MESSAGE };
   if (!res.ok) return { ok: false, status: res.status, error: loginError(res.status) };
   return { ok: Boolean(res.data?.user), status: res.status, error: res.data?.user ? "" : loginError(401) };
 }
@@ -140,4 +152,26 @@ export async function logoutSession() {
     localStorage.removeItem(CANDIDATES_KEY);
     localStorage.removeItem(INVITATIONS_KEY);
   } catch {}
+}
+
+/** Ponovno slanje linka za potvrdu emaila. Odgovor je isti bez obzira da li nalog postoji. */
+export async function resendVerificationEmail(email) {
+  const res = await postJson("/api/public/candidate-accounts/resend-verification", {
+    email: String(email || "").trim().toLowerCase(),
+  });
+  if (res.status === 429) return { ok: false, message: "Previše zahteva. Sačekaj 15 minuta pa probaj ponovo." };
+  if (res.status === 0) return { ok: false, message: "Nema veze sa serverom. Proveri internet i probaj ponovo." };
+  return {
+    ok: res.ok,
+    message: res.data?.message || "Ako nalog čeka potvrdu, poslali smo novi link.",
+    devVerificationUrl: res.data?.devVerificationUrl || "",
+  };
+}
+
+/** Link iz mejla „Potvrdi email". */
+export async function confirmEmail(token) {
+  const res = await postJson("/api/public/candidate-accounts/verify-email", { token });
+  if (res.ok) return { ok: true, email: res.data?.email || "" };
+  if (res.status === 0) return { ok: false, reason: "offline", message: "Nema veze sa serverom. Proveri internet i probaj ponovo." };
+  return { ok: false, reason: res.data?.reason || "invalid", message: res.data?.message || "Link nije ispravan." };
 }

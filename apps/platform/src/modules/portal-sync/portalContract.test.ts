@@ -1,14 +1,19 @@
 import { PDFDocument } from 'pdf-lib'
 import { describe, expect, it } from 'vitest'
 
-import { acceptanceReference, buildPortalContractDraft, renderPortalContractPdf } from './portalContract.ts'
+import {
+  acceptanceReference,
+  buildPortalContractDraft,
+  portalContractFileName,
+  renderPortalContractPdf,
+} from './portalContract.ts'
 
 const candidate = {
   address: 'Ulica 1, Beograd',
   email: 'Marko@Test.rs',
   finalPrice: 1750,
   firstName: 'Marko',
-  idCardNumber: '009988776',
+  passportNumber: '009988776',
   jmbg: '0101000710000',
   lastName: 'Test',
   packageName: 'Work & Travel USA — Full Placement',
@@ -34,8 +39,18 @@ describe('portal contract', () => {
   })
 
   it('refuses to fill a contract with missing data instead of inventing it', () => {
-    const draft = buildPortalContractDraft({ ...candidate, idCardNumber: '', jmbg: '123' })
+    const draft = buildPortalContractDraft({ ...candidate, passportNumber: '', jmbg: '123' })
     expect(draft.missing).toEqual(expect.arrayContaining(['JMBG (13 cifara)', 'broj pasoša']))
+  })
+
+  it('requires the home address, which is printed in the contract annex', () => {
+    expect(buildPortalContractDraft({ ...candidate, address: '' }).missing).toContain('adresa prebivališta')
+  })
+
+  it('names the contract file without diacritics', () => {
+    expect(portalContractFileName({ firstName: 'Đorđe', lastName: 'Petrović' }, 'AA-2027-ABC123')).toBe(
+      'Ugovor_AA-2027-ABC123_Petrovic_Djordje.pdf',
+    )
   })
 
   it('renders the official contract plus annex, statement and acceptance proof', async () => {

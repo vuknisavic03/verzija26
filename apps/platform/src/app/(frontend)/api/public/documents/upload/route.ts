@@ -1,3 +1,4 @@
+import { notifyAgencyChanges } from '@/modules/portal-sync/portalNotifications.ts'
 import fs from 'node:fs'
 import path from 'node:path'
 import config from '@payload-config'
@@ -189,8 +190,12 @@ export async function POST(request: Request) {
 
     if (docType === 'signedContract' || docType === 'contract') {
       if (candidate) {
-        await savePortalCandidate({
+        const updated = {
           ...candidate,
+          // Novi potpisan ugovor uvek ide na proveru agencije.
+          contractApproved: false,
+          contractRejectionReason: '',
+          contractVerificationStatus: 'pending',
           contractDownloaded: true,
           contractSigned: true,
           contractSignedAt: new Date().toISOString(),
@@ -199,14 +204,16 @@ export async function POST(request: Request) {
           signedContractUploadedAt: new Date().toISOString(),
           signedContractUrl: fileUrl,
           signedContractDataUrl: undefined,
-        })
+        }
+        await savePortalCandidate(updated as never)
+        notifyAgencyChanges(candidate as unknown as Record<string, unknown>, updated as unknown as Record<string, unknown>)
       }
 
       return json({
         fileName: file.name,
         fileUrl,
         previewDataUrl,
-        message: 'Potpisani ugovor je uspešno otpremljen! Uplatnica i plaćanje su sada omogućeni.',
+        message: 'Potpisan ugovor je okačen. Uplata ti je otvorena, a agencija proverava ugovor.',
         success: true,
       })
     }

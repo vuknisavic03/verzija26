@@ -540,6 +540,19 @@ export async function getPortalState(): Promise<PortalStoreData> {
   }
 }
 
+async function findCandidateAccountByEmail(email: string) {
+  const payload = await getPayloadIfAvailable()
+  if (!payload) return null
+  const found = await payload.find({
+    collection: 'candidate-accounts',
+    depth: 0,
+    limit: 1,
+    overrideAccess: true,
+    where: { email: { equals: email } },
+  })
+  return found.docs[0] ?? null
+}
+
 export async function verifyPortalInvitation(email: string, code: string) {
   const normEmail = String(email || '').trim().toLowerCase()
   const normCode = String(code || '').trim().toUpperCase()
@@ -612,24 +625,21 @@ export async function verifyPortalInvitation(email: string, code: string) {
     }
   }
 
-  if (inv.status === 'registered') {
-    const registeredCand = state.candidates.find(
-      (c) =>
-        (c.email || '').toLowerCase() === normEmail &&
-        c.status !== 'applying' &&
-        !String(c.id).startsWith('preapp-')
-    );
-    if (!registeredCand) {
-      inv.status = 'pending';
-      delete inv.registeredAt;
-      await writeStore(state);
-    } else {
-      return {
-        message: 'Ovaj kod je već iskorišćen. Prijavi se svojim emailom i lozinkom.',
-        status: 400,
-        valid: false,
-      };
+  // Odlučuje stvarni nalog, ne status pozivnice: aktiviran nalog se vraća samo prijavom
+  // (email + lozinka), a pozivnica označena kao iskorišćena bez naloga ponovo važi.
+  const account = await findCandidateAccountByEmail(normEmail)
+  if (account && (account.accountStatus === 'ACTIVE' || account._verified)) {
+    return {
+      alreadyActive: true,
+      message: 'Tvoj nalog je već aktiviran. Prijavi se emailom i lozinkom — kod ti više ne treba.',
+      status: 409,
+      valid: false,
     }
+  }
+  if (inv.status === 'registered' && !account) {
+    inv.status = 'pending'
+    delete inv.registeredAt
+    await writeStore(state)
   }
 
   return {
@@ -817,7 +827,7 @@ export async function savePortalCandidate(candidateInput: Partial<PortalCandidat
     policeCertificateUploaded: candidateInput.policeCertificateUploaded !== undefined ? Boolean(candidateInput.policeCertificateUploaded) : base?.policeCertificateUploaded,
     policeCertificateTranslated: candidateInput.policeCertificateTranslated !== undefined ? Boolean(candidateInput.policeCertificateTranslated) : base?.policeCertificateTranslated,
     policeCertificateUploadedAt: candidateInput.policeCertificateUploadedAt ?? base?.policeCertificateUploadedAt ?? undefined,
-    passportNumber: (candidateInput.passportNumber && String(candidateInput.passportNumber).trim()) || base?.passportNumber || candidateInput.idCardNumber || base?.idCardNumber || '',
+    passportNumber: (candidateInput.passportNumber && String(candidateInput.passportNumber).trim()) || base?.passportNumber || '',
     passportScanFileName:
       (candidateInput.passportScanFileName && String(candidateInput.passportScanFileName).trim()) ||
       base?.passportScanFileName ||
@@ -1158,7 +1168,6 @@ export async function savePortalCandidateDs160(candidateIdOrEmail: string | numb
     if (ds160.jmbg) target.jmbg = ds160.jmbg
     if (ds160.passportNumber) {
       target.passportNumber = ds160.passportNumber
-      target.idCardNumber = ds160.passportNumber
     }
     if (ds160.dateOfBirth) target.birthDate = ds160.dateOfBirth
     if (ds160.passportExpiryDate) target.passportExpiryDate = ds160.passportExpiryDate

@@ -20,6 +20,7 @@ import { PassportAuthorizationDownloadPanel as PassportAuthorizationDownloadPane
 import { GeneratedContractDownloadPanel as GeneratedContractDownloadPanel_8ca607edf1842422addabe3cd7d7d763 } from '../../../components/admin/GeneratedContractDownloadPanel'
 import { AcceptedContractDownloadPanel as AcceptedContractDownloadPanel_2e323708f4da4da688ef834a9b21f1f5 } from '../../../components/admin/AcceptedContractDownloadPanel'
 import { PreApplicationProcessingPanel as PreApplicationProcessingPanel_c75381fc07a57014b4d83e749a54e8c1 } from '../../../components/admin/PreApplicationProcessingPanel'
+import { PreApplicationsExportBar as PreApplicationsExportBar_86e3e92abdd46065d6961a9f4f5a06fa } from '../../../components/admin/PreApplicationsExportBar'
 import { CollectionCards as CollectionCards_f9c02e79a4aed9a3924487c0cd4cafb1 } from '@payloadcms/next/rsc'
 
 /** @type import('payload').ImportMap */
@@ -46,5 +47,6 @@ export const importMap = {
   "./components/admin/GeneratedContractDownloadPanel#GeneratedContractDownloadPanel": GeneratedContractDownloadPanel_8ca607edf1842422addabe3cd7d7d763,
   "./components/admin/AcceptedContractDownloadPanel#AcceptedContractDownloadPanel": AcceptedContractDownloadPanel_2e323708f4da4da688ef834a9b21f1f5,
   "./components/admin/PreApplicationProcessingPanel#PreApplicationProcessingPanel": PreApplicationProcessingPanel_c75381fc07a57014b4d83e749a54e8c1,
+  "./components/admin/PreApplicationsExportBar#PreApplicationsExportBar": PreApplicationsExportBar_86e3e92abdd46065d6961a9f4f5a06fa,
   "@payloadcms/next/rsc#CollectionCards": CollectionCards_f9c02e79a4aed9a3924487c0cd4cafb1
 }

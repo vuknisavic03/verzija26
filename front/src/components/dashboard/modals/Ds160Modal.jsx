@@ -13,24 +13,26 @@ export default function Ds160Modal({ candidate, onClose, onSave }) {
     return {
       lastNameAndMaiden: d.lastNameAndMaiden || candLast || "",
       firstName: d.firstName || candFirst || "",
-      gender: d.gender || candidate.gender || "Muški",
-      maritalStatus: d.maritalStatus || candidate.maritalStatus || "Neoženjen / Neudata",
+      gender: d.gender || candidate.gender || "",
+      maritalStatus: d.maritalStatus || candidate.maritalStatus || "",
       dateOfBirth: d.dateOfBirth || candidate.birthDate || candidate.dateOfBirth || "",
       birthPlace: d.birthPlace || candidate.birthPlace || candidate.city || candidate.studyCity || "",
       birthCountry: d.birthCountry || candidate.birthCountry || "Srbija",
       citizenship: d.citizenship || candidate.citizenship || "Republika Srbija",
       jmbg: d.jmbg || candidate.jmbg || "",
       ssn: d.ssn || candidate.ssn || "",
-      passportNumber: d.passportNumber || candidate.passportNumber || candidate.idCardNumber || "",
+      passportNumber: d.passportNumber || candidate.passportNumber || "",
       passportCountry: d.passportCountry || candidate.passportCountry || "Republika Srbija",
       passportExpiryDate: d.passportExpiryDate || candidate.passportExpiryDate || candidate.passportExpiry || "",
       employerInfo: d.employerInfo || (candidate.selectedJobEmployer || candidate.jobEmployer ? `${candidate.selectedJobEmployer || candidate.jobEmployer} (${candidate.selectedJobTitle || candidate.jobTitle || "Radna pozicija"})` : ""),
       stayAddress: d.stayAddress || (candidate.selectedJobCity || candidate.jobCity || candidate.jobLocation ? `${candidate.selectedJobHousing || candidate.jobHousing ? `${candidate.selectedJobHousing || candidate.jobHousing}, ` : ""}${candidate.selectedJobCity || candidate.jobCity || candidate.jobLocation}, SAD` : ""),
-      supervisorName: d.supervisorName || (candidate.selectedJobEmployer || candidate.jobEmployer ? "HR Department / Supervisor" : ""),
-      employerPhone: d.employerPhone || (candidate.selectedJobEmployer || candidate.jobEmployer ? "+1 (555) 234-5678" : ""),
-      tripFunder: d.tripFunder || "Roditelji / Lična sredstva",
-      previousUsTravel: d.previousUsTravel || "Ne",
-      visaRefusal: d.visaRefusal || "Ne",
+      // Nadređeni i telefon poslodavca dolaze sa servera iz potpisanog Job Offera; ništa se ne izmišlja.
+      supervisorName: d.supervisorName || "",
+      employerPhone: d.employerPhone || "",
+      tripFunder: d.tripFunder || "",
+      // Kandidat mora sam da odgovori (izjava za ambasadu), pa nema unapred upisanog „Ne".
+      previousUsTravel: d.previousUsTravel || "",
+      visaRefusal: d.visaRefusal || "",
       homeAddress: d.homeAddress || candidate.address || "",
       mobilePhone: d.mobilePhone || candidate.phone || "",
       primaryEmail: d.primaryEmail || candidate.email || "",
@@ -103,6 +105,9 @@ export default function Ds160Modal({ candidate, onClose, onSave }) {
     <FormField key={key} label={label} hint={o.hint} className={o.wide ? "sm:col-span-2" : ""}>
       {o.options ? (
         <select value={f[key]} onChange={upd(key)} className={inp}>
+          <option value="" disabled>
+            Izaberi
+          </option>
           {o.options.map((x) => (
             <option key={x} value={x}>
               {x}

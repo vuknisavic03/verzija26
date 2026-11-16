@@ -44,6 +44,8 @@ export function buildRegistrationTasks(ctx) {
         : "Čeka tvoj potpis",
       desc: isContractApproved
         ? null
+        : contractRejected
+        ? `Agencija je vratila ugovor${candidate.contractRejectionReason ? `: ${candidate.contractRejectionReason}` : "."} Okači ispravno potpisan ugovor (dugme „Zameni").`
         : isContractPending
         ? "Proveravamo potpise. Uplatnicu već možeš da preuzmeš."
         : "Ugovor i izjava su već popunjeni tvojim podacima — odštampaj, potpiši i okači sken.",
@@ -58,7 +60,7 @@ export function buildRegistrationTasks(ctx) {
           ) : (
             <>
               <Button variant={isNext ? "primary" : "dark"} size="sm" onClick={() => setShowSignContractModal(true)}>
-                Potpiši ugovor
+                Preuzmi i potpiši ugovor
               </Button>
               <Button variant="outline" size="sm" disabled={isUploadingSignedContract} onClick={pickSignedContract}>
                 <UploadIcon className="h-4 w-4" />

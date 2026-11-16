@@ -21,9 +21,10 @@ import {
   keepServerManagedFields,
   sanitizeCandidateUpdate,
 } from '@/modules/portal-sync/access.ts'
+import { applyContractVerification, ContractVerificationError } from '@/modules/portal-sync/contractVerification.ts'
 import { PortalJobError, selectPortalJob } from '@/modules/portal-sync/portalJobActions.ts'
 import { normalizeJobInput, offeredJobsFor, publicJob } from '@/modules/portal-sync/portalJobs.ts'
-import { notifyAgencyChanges, notifyCandidateChanges } from '@/modules/portal-sync/portalNotifications.ts'
+import { notifyAgencyChanges, notifyCandidateChanges, sendInvitationEmail } from '@/modules/portal-sync/portalNotifications.ts'
 import { readTranslation, translationApproved } from '@/modules/portal-sync/portalTranslationRules.ts'
 import { isSameOriginRequest } from '@/modules/security/sameOrigin.ts'
 
@@ -72,7 +73,7 @@ export async function GET() {
   }
 }
 
-// Potpis ugovora ide isključivo preko /api/public/contracts/accept (sa dokazom), ne ovde.
+// Ugovor se potpisuje svojeručno; potpisan sken ide preko /api/public/documents/upload (docType contract).
 const CANDIDATE_ACTIONS = new Set(['saveCandidate', 'saveDs160', 'selectJob'])
 
 export async function POST(request: Request) {
@@ -143,8 +144,20 @@ export async function POST(request: Request) {
         packageId: typeof data.packageId === 'string' ? data.packageId : 'swt-full',
         packageName: typeof data.packageName === 'string' ? data.packageName : undefined,
       })
+      // Kandidatu odmah ide mejl sa kodom i linkom za registraciju.
+      const emailSent = data.sendEmail === false ? false : await sendInvitationEmail(invitation)
       const state = await getPortalState()
-      return json({ invitation, invitations: state.invitations }, 201)
+      return json({ emailSent, invitation, invitations: state.invitations }, 201)
+    }
+
+    if (action === 'resendInvitation') {
+      const code = String(data.code || '').trim().toUpperCase()
+      const state = await getPortalState()
+      const invitation = state.invitations.find((i) => i.code === code)
+      if (!invitation) return json({ message: 'Pozivnica nije pronađena.' }, 404)
+      if (invitation.status === 'registered') return json({ message: 'Kandidat se već registrovao.' }, 409)
+      const emailSent = await sendInvitationEmail(invitation)
+      return json({ emailSent, message: emailSent ? 'Pozivnica je ponovo poslata.' : 'Mejl trenutno nije poslat.' }, emailSent ? 200 : 502)
     }
 
     if (action === 'saveCandidate') {
@@ -172,6 +185,26 @@ export async function POST(request: Request) {
         candidates: state.candidates,
         invitations: state.invitations,
       })
+    }
+
+    // Overa ili vraćanje potpisanog ugovora: nad trenutnim zapisom sa servera, uz obaveštenje kandidatu.
+    if (action === 'verifyContract') {
+      const before = await getPortalState()
+      const email = String(data.email || '').toLowerCase()
+      const existing = before.candidates.find((c) => String(c.email || '').toLowerCase() === email)
+      if (!existing) return json({ message: 'Kandidat nije pronađen.' }, 404)
+      try {
+        const next = applyContractVerification(existing as unknown as Record<string, unknown>, {
+          approved: data.approved === true,
+          reason: typeof data.reason === 'string' ? data.reason : '',
+        })
+        const candidate = await savePortalCandidate(next as never)
+        notifyCandidateChanges(existing as unknown as Record<string, unknown>, candidate as unknown as Record<string, unknown>)
+        return json({ candidate })
+      } catch (error) {
+        if (error instanceof ContractVerificationError) return json({ message: error.message }, error.status)
+        throw error
+      }
     }
 
     if (action === 'resetInvitation') {

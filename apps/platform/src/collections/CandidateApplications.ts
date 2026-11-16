@@ -15,7 +15,7 @@ const administratorOrOwnAccount: Access = ({ req }) => {
 export const CandidateApplications: CollectionConfig = {
   slug: 'candidate-applications',
   access: {
-    create: () => true, // Omogućava kreiranje pri registraciji i od strane administratora
+    create: isAdministrator, // Registracija upisuje preko serverskog koda (overrideAccess)
     delete: isAdministrator,
     read: administratorOrOwnAccount,
     update: isAdministrator, // Administrator ima punu mogućnost izmene podataka sa aplikacije

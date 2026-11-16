@@ -164,9 +164,9 @@ export async function generateEmbassyExcelBuffer(
     row.getCell(4).value = sanitizeExcelCellValue(cand.dateOfBirth || '')
     row.getCell(5).value = sanitizeExcelCellValue(cand.idCardOrPassportNumber || '')
     row.getCell(6).value = 'Male' // standard default
-    row.getCell(7).value = sanitizeExcelCellValue((cand.studyCity || 'BELGRADE').toUpperCase())
+    row.getCell(7).value = sanitizeExcelCellValue((cand.studyCity || '').toUpperCase())
     row.getCell(8).value = 'Public'
-    row.getCell(9).value = sanitizeExcelCellValue(cand.facultyName || 'University of Belgrade')
+    row.getCell(9).value = sanitizeExcelCellValue(cand.facultyName || '')
     row.getCell(10).value = 'Economics'
     row.getCell(11).value = 'budget'
     row.getCell(12).value = '3rd'

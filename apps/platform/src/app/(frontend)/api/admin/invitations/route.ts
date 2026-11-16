@@ -2,6 +2,8 @@ import config from '@payload-config'
 import { headers } from 'next/headers'
 import { getPayload } from 'payload'
 
+import { generateInvitationCode } from '@/modules/portal-sync/access.ts'
+
 function json(body: unknown, status: number) {
   return Response.json(body, { headers: { 'Cache-Control': 'no-store' }, status })
 }
@@ -45,9 +47,7 @@ export async function POST(request: Request) {
       return json({ message: 'Email adresa je obavezna.' }, 400)
     }
 
-    // Generiši kod npr. WT-7492 ako nije zadat
-    const randomDigits = Math.floor(1000 + Math.random() * 9000)
-    const code = String(body.code || `WT-${randomDigits}`).trim().toUpperCase()
+    const code = generateInvitationCode()
 
     const basePrice = Number(body.basePrice) || 1850
     const discount = Number(body.discount) || 0

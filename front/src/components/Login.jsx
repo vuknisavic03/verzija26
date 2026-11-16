@@ -1,8 +1,8 @@
 // Login.jsx
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "../i18n/LanguageContext";
-import { DEMO_ADMIN } from "../config";
 import { Button, inputCls, labelCls } from "./ui";
+import { resendVerificationEmail } from "../data/candidateStore/session";
 
 function EyeIcon({ off = false }) {
   return (
@@ -45,6 +45,22 @@ export default function Login({
   const [show, setShow] = useState(false);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  // Nalog postoji, lozinka je tačna, ali email nije potvrđen.
+  const [unverified, setUnverified] = useState(false);
+  const [resendState, setResendState] = useState({ busy: false, message: "", devLink: "" });
+
+  // Link iz mejla „Potvrdi email" vodi ovde sa ?email=, pa je polje već popunjeno.
+  useEffect(() => {
+    const fromLink = new URLSearchParams(window.location.search).get("email");
+    if (fromLink) setIdentifier(fromLink);
+  }, []);
+
+  const resend = async () => {
+    if (resendState.busy) return;
+    setResendState({ busy: true, message: "" });
+    const res = await resendVerificationEmail(identifier);
+    setResendState({ busy: false, message: res.message, devLink: res.devVerificationUrl || "" });
+  };
 
   const go = (href) => (e) => onNavigate(e, href);
 
@@ -52,10 +68,13 @@ export default function Login({
     e.preventDefault();
     if (busy) return;
     setError("");
+    setUnverified(false);
+    setResendState({ busy: false, message: "" });
     setBusy(true);
     try {
       const res = await onSubmit({ identifier, password });
       if (res?.error) setError(res.error);
+      if (res?.unverified) setUnverified(true);
     } finally {
       setBusy(false);
     }
@@ -69,10 +88,40 @@ export default function Login({
           <p className="mt-3 text-[15px] leading-relaxed text-ink-2">{t("login.subtitle")}</p>
 
           <form onSubmit={handleSubmit} className="mt-8 space-y-5">
-            {error && (
+            {error && !unverified && (
               <p role="alert" className="rounded-xl bg-red-50 px-4 py-3 text-sm leading-relaxed text-red-700">
                 {error}
               </p>
+            )}
+            {unverified && (
+              <div role="alert" className="rounded-xl bg-amber-50 px-4 py-3 text-sm leading-relaxed text-amber-900">
+                <p className="font-medium">Potvrdi email pa se prijavi</p>
+                <p className="mt-1">
+                  Posle registracije smo ti poslali mejl sa linkom za potvrdu. Ne vidiš ga? Proveri Spam ili zatraži novi.
+                </p>
+                {resendState.message ? (
+                  <p className="mt-2 text-amber-900" role="status">
+                    {resendState.message}
+                    {resendState.devLink && (
+                      <>
+                        {" "}Lokalni razvoj, mejlovi se ne šalju:{" "}
+                        <a href={new URL(resendState.devLink).pathname + new URL(resendState.devLink).search} className="font-medium underline underline-offset-4">
+                          potvrdi email
+                        </a>
+                      </>
+                    )}
+                  </p>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={resend}
+                    disabled={resendState.busy}
+                    className="mt-2 font-medium underline underline-offset-4 disabled:opacity-60"
+                  >
+                    {resendState.busy ? "Šaljem…" : "Pošalji link ponovo"}
+                  </button>
+                )}
+              </div>
             )}
 
             <div>
@@ -81,7 +130,8 @@ export default function Login({
               </label>
               <input
                 id="l-id"
-                type="text"
+                type="email"
+                inputMode="email"
                 required
                 value={identifier}
                 onChange={(e) => setIdentifier(e.target.value)}
@@ -147,25 +197,6 @@ export default function Login({
           </div>
         </dl>
 
-        {/* Samo u prototip režimu (VITE_DEMO_MODE) — ne ulazi u produkcioni build. */}
-        {DEMO_ADMIN && (
-          <div className="mt-6 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-dashed border-line-strong px-6 py-4 text-sm text-ink-2">
-            <p>
-              Demo administrator: <span className="font-semibold text-ink">{DEMO_ADMIN.identifier}</span> /{" "}
-              <span className="font-semibold text-ink">{DEMO_ADMIN.password}</span>
-            </p>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => {
-                setIdentifier(DEMO_ADMIN.identifier);
-                setPassword(DEMO_ADMIN.password);
-              }}
-            >
-              Popuni
-            </Button>
-          </div>
-        )}
       </div>
     </section>
   );

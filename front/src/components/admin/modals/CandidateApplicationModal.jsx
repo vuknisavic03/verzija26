@@ -27,7 +27,7 @@ import { FIELD_CLS, STATUS_FLOW, PlusIcon, XIcon, Modal, Field } from "../ui";
 import { Button } from "../../ui";
 import { TaskIcon, DataList, cardCls } from "../../dashboard/ui";
 
-export default function CandidateApplicationModal({ candidate, onSave, onClose }) {
+export default function CandidateApplicationModal({ candidate, onSave, onSaved, onClose }) {
   const { t } = useTranslation();
   const promotions = getPromotions();
 
@@ -45,7 +45,8 @@ export default function CandidateApplicationModal({ candidate, onSave, onClose }
   const [phone, setPhone] = useState(candidate.phone || "");
   const [jmbg, setJmbg] = useState(candidate.jmbg || candidate.ds160?.jmbg || "");
   const [idCardNumber, setIdCardNumber] = useState(candidate.idCardNumber || "");
-  const [passportNumber, setPassportNumber] = useState(candidate.passportNumber || candidate.idCardNumber || candidate.ds160?.passportNumber || "");
+  const [passportNumber, setPassportNumber] = useState(candidate.passportNumber || candidate.ds160?.passportNumber || "");
+  const [idCardExpiryDate, setIdCardExpiryDate] = useState(candidate.idCardExpiryDate || "");
   const [birthDate, setBirthDate] = useState(candidate.birthDate || candidate.dateOfBirth || candidate.ds160?.dateOfBirth || "");
   const [passportExpiryDate, setPassportExpiryDate] = useState(candidate.passportExpiryDate || candidate.passportExpiry || candidate.ds160?.passportExpiryDate || "");
   const [gender, setGender] = useState(candidate.gender || candidate.ds160?.gender || "Muški");
@@ -300,8 +301,9 @@ export default function CandidateApplicationModal({ candidate, onSave, onClose }
       email: email.trim(),
       phone: phone.trim(),
       jmbg: jmbg.trim(),
-      idCardNumber: idCardNumber.trim() || passportNumber.trim(),
-      passportNumber: passportNumber.trim() || idCardNumber.trim(),
+      idCardNumber: idCardNumber.trim(),
+      idCardExpiryDate: idCardExpiryDate.trim(),
+      passportNumber: passportNumber.trim(),
       birthDate: birthDate.trim(),
       dateOfBirth: birthDate.trim(),
       passportExpiryDate: passportExpiryDate.trim(),
@@ -454,34 +456,26 @@ export default function CandidateApplicationModal({ candidate, onSave, onClose }
   };
 
   // Reaktivne akcije u modalu:
-  const handleVerifyContractAction = (approved, reason = "") => {
-    verifyCandidateContract(candidate.id || email, approved, reason);
-    const nextVerStatus = approved ? "approved" : "rejected";
-    setContractVerificationStatus(nextVerStatus);
-    setContractApproved(approved);
-    if (!approved) setContractRejectionReason(reason);
-    else setContractRejectionReason("");
-
-    // Ako su i ugovor i I rata sada odobreni, automatski prebaci na Korak 1 (docs); ako je ugovor odbijen, vrati na Registraciju (review)
-    const shouldAdvanceToDocs = approved && firstInstallmentApproved && (status === "review" || status === "applying");
-    const shouldRevertToReview = !approved && (status === "docs" || status === "in_review");
-    const nextStatus = shouldAdvanceToDocs ? "docs" : shouldRevertToReview ? "review" : status;
-    if (nextStatus !== status) setStatus(nextStatus);
-
-    const updated = buildUpdatedCandidate({
-      contractVerificationStatus: nextVerStatus,
-      contractApproved: approved,
-      contractRejectionReason: approved ? "" : reason,
-      status: nextStatus,
-    });
-    onSave(updated, { keepOpen: true });
-
+  const handleVerifyContractAction = async (approved, reason = "") => {
+    const result = await verifyCandidateContract(candidate.email || email, approved, reason);
+    if (!result.ok) {
+      showToast(result.error);
+      return;
+    }
+    const saved = result.candidate;
+    setContractVerificationStatus(saved.contractVerificationStatus || (approved ? "approved" : "rejected"));
+    setContractApproved(Boolean(saved.contractApproved));
+    setContractRejectionReason(saved.contractRejectionReason || "");
+    const advanced = saved.status && saved.status !== status;
+    if (saved.status) setStatus(saved.status);
+    // Lista u adminu dobija zapis sa servera (bez ponovnog slanja).
+    onSaved?.(saved);
     showToast(
-      shouldAdvanceToDocs
-        ? "Ugovor odobren! Pošto je i I rata plaćena, kandidat je automatski prebačen na Korak 1: Dokumenta."
+      approved && advanced && saved.status === "docs"
+        ? "Ugovor odobren. Pošto je i I rata plaćena, kandidat je prebačen na Korak 1: Dokumenta."
         : approved
-        ? "Svojeručno potpisani ugovor je odobren!"
-        : "Ugovor je odbijen uz obrazloženje. Student na svom profilu sada vidi status odbijenog ugovora i razlog vraćanja."
+        ? "Potpisan ugovor je odobren. Kandidat je dobio mejl."
+        : "Ugovor je vraćen. Kandidat vidi razlog na profilu i dobio je mejl."
     );
   };
 
@@ -1073,6 +1067,31 @@ export default function CandidateApplicationModal({ candidate, onSave, onClose }
                     </button>
                   )}
                   <Upload busy={uploadingDocType === "passport"} onFile={(f) => handleAdminDocUpload(f, "passport")} label={passportScan ? "Zameni" : "Okači sken"} />
+                </DocRow>
+                <DocRow
+                  name="Lična karta"
+                  sub={[candidate.idCardFrontFileName, candidate.idCardBackFileName].filter(Boolean).join(", ") || "Nije okačena"}
+                  state={candidate.idCardFrontUrl || candidate.idCardBackUrl ? "done" : "current"}
+                  status={candidate.idCardFrontUrl && candidate.idCardBackUrl ? "Obe strane" : candidate.idCardFrontUrl || candidate.idCardBackUrl ? "Jedna strana" : "Nedostaje"}
+                >
+                  {candidate.idCardFrontUrl && (
+                    <button
+                      type="button"
+                      onClick={() => openDocumentPreview("Lična karta, prednja strana", candidate.idCardFrontFileName || "Licna_karta_prednja.jpg", candidate.idCardFrontUrl, "", "idcard")}
+                      className={linkCls}
+                    >
+                      Prednja
+                    </button>
+                  )}
+                  {candidate.idCardBackUrl && (
+                    <button
+                      type="button"
+                      onClick={() => openDocumentPreview("Lična karta, zadnja strana", candidate.idCardBackFileName || "Licna_karta_zadnja.jpg", candidate.idCardBackUrl, "", "idcard")}
+                      className={linkCls}
+                    >
+                      Zadnja
+                    </button>
+                  )}
                 </DocRow>
               </ul>
             </Section>
@@ -1906,15 +1925,14 @@ export default function CandidateApplicationModal({ candidate, onSave, onClose }
                 <Field label="JMBG">
                   <input value={jmbg} onChange={(e) => setJmbg(e.target.value)} maxLength={13} className={`${FIELD_CLS} tabular-nums`} />
                 </Field>
-                <Field label="Broj pasoša / lične karte">
-                  <input
-                    value={passportNumber}
-                    onChange={(e) => {
-                      setPassportNumber(e.target.value);
-                      setIdCardNumber(e.target.value);
-                    }}
-                    className={`${FIELD_CLS} tabular-nums`}
-                  />
+                <Field label="Broj pasoša">
+                  <input value={passportNumber} onChange={(e) => setPassportNumber(e.target.value)} className={`${FIELD_CLS} tabular-nums`} />
+                </Field>
+                <Field label="Broj lične karte">
+                  <input value={idCardNumber} onChange={(e) => setIdCardNumber(e.target.value)} className={`${FIELD_CLS} tabular-nums`} />
+                </Field>
+                <Field label="Lična karta važi do">
+                  <input value={idCardExpiryDate} onChange={(e) => setIdCardExpiryDate(e.target.value)} placeholder="GGGG-MM-DD" className={FIELD_CLS} />
                 </Field>
                 <Field label="Datum rođenja">
                   <input value={birthDate} onChange={(e) => setBirthDate(e.target.value)} placeholder="DD/MM/GGGG" className={FIELD_CLS} />

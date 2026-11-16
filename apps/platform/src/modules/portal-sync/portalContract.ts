@@ -93,7 +93,7 @@ export function buildPortalContractDraft(candidate: Candidate): PortalContractDr
   const candidateName =
     `${text(candidate.firstName)} ${text(candidate.lastName)}`.trim() || text(candidate.name)
   const jmbg = text(candidate.jmbg).replace(/\D/g, '')
-  const passportNumber = text(candidate.passportNumber) || text(candidate.idCardNumber)
+  const passportNumber = text(candidate.passportNumber)
   const price = Number(candidate.finalPrice)
   const guarantor = (candidate.guarantor || null) as { name?: string } | null
 
@@ -120,6 +120,7 @@ export function buildPortalContractDraft(candidate: Candidate): PortalContractDr
   if (!candidateName) missing.push('ime i prezime')
   if (!/^\d{13}$/.test(jmbg)) missing.push('JMBG (13 cifara)')
   if (passportNumber.length < 5) missing.push('broj pasoša')
+  if (!text(candidate.address)) missing.push('adresa prebivališta')
   if (!facts.priceLabel) missing.push('cena programa')
   if (candidate.paymentMethod === 'later' && !facts.guarantorName) missing.push('jemac')
   if (!officialBytes) missing.push('zvanični ugovor agencije (fajl nedostaje na serveru)')
@@ -252,6 +253,19 @@ export async function renderPortalContractPdf(draft: PortalContractDraft, accept
   annex.row('Ugovorena cena', facts.priceLabel)
   if (facts.guarantorName) annex.row('Jemac', facts.guarantorName)
   annex.row('Zvaničan tekst ugovora', `${facts.officialFile} (SHA-256 ${facts.officialSha256.slice(0, 16)}…)`)
+  if (!acceptance) {
+    // Ugovor se potpisuje svojeručno: mesta za potpis na prilogu.
+    annex.paragraph(' ', 10)
+    annex.paragraph('Svojim potpisom Naručilac usluga potvrđuje da su podaci u ovom prilogu tačni i da prihvata ugovor.', 9.5, MUTED)
+    annex.paragraph(' ', 10)
+    annex.row('Mesto i datum', '______________________________')
+    annex.paragraph(' ', 10)
+    annex.row('Potpis Naručioca usluga', '______________________________')
+    if (facts.guarantorName) {
+      annex.paragraph(' ', 10)
+      annex.row('Potpis jemca', '______________________________')
+    }
+  }
 
   const statementBytes = await renderResponsibilityStatementPdf({
     acceptedAt: acceptance ? new Date(acceptance.acceptedAt) : undefined,
@@ -290,4 +304,16 @@ export async function renderPortalContractPdf(draft: PortalContractDraft, accept
 export function acceptanceReference(fingerprint: string, acceptedAt: string, contractNumber: string) {
   const digest = createHash('sha256').update(`${fingerprint}:${acceptedAt}`).digest('hex').slice(0, 8).toUpperCase()
   return `${contractNumber}-EP-${digest}`
+}
+
+/** Ime fajla ugovora: Ugovor_<broj>_<Prezime>_<Ime>.pdf (bez kvačica). */
+export function portalContractFileName(candidate: Candidate, contractNumber: string) {
+  const safe = (value: unknown, fallback: string) =>
+    (text(value) || fallback)
+      .replace(/đ/g, 'dj')
+      .replace(/Đ/g, 'Dj')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^a-zA-Z0-9_-]/g, '_')
+  return `Ugovor_${contractNumber}_${safe(candidate.lastName, 'Kandidat')}_${safe(candidate.firstName, 'AA')}.pdf`
 }

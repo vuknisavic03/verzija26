@@ -7,6 +7,8 @@ import type { RenderedCandidateMessage } from './templates.ts'
 type CandidateCommunicationEnvironment = PlatformEnvironment['candidateCommunication']
 
 export type SendCandidateMessageInput = {
+  /** Prilozi (npr. ugovor u PDF-u); sadržaj je base64. */
+  attachments?: Array<{ content: string; filename: string }>
   idempotencyKey: string
   message: RenderedCandidateMessage
   recipientEmail: string
@@ -39,12 +41,13 @@ export function createCandidateEmailProvider(
 
   return {
     name: 'resend',
-    async send({ idempotencyKey, message, recipientEmail }) {
+    async send({ attachments, idempotencyKey, message, recipientEmail }) {
       let response: Response
 
       try {
         response = await fetchImplementation('https://api.resend.com/emails', {
           body: JSON.stringify({
+            ...(attachments?.length ? { attachments } : {}),
             from: environment.from,
             html: message.html,
             reply_to: environment.replyTo,

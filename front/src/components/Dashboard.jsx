@@ -104,6 +104,27 @@ export default function Dashboard({
     });
   }, [candidateData?.email]);
 
+  // Kad se kandidat vrati na karticu, preuzmi izmene agencije (overa ugovora, uplate, dosije).
+  useEffect(() => {
+    const emailToSync = candidateData?.email || candidate?.email;
+    if (!emailToSync) return undefined;
+    let last = Date.now();
+    const refresh = () => {
+      if (document.visibilityState !== "visible" || Date.now() - last < 15_000) return;
+      last = Date.now();
+      syncFromBackend(emailToSync).then((data) => {
+        if (data?.candidate) setCandidate((prev) => ({ ...(prev || {}), ...data.candidate }));
+      });
+    };
+    document.addEventListener("visibilitychange", refresh);
+    window.addEventListener("focus", refresh);
+    return () => {
+      document.removeEventListener("visibilitychange", refresh);
+      window.removeEventListener("focus", refresh);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [candidateData?.email]);
+
   // Stanja za ispunjavanje obaveznih stavki
   const [youtubeInput, setYoutubeInput] = useState(candidate.youtubeUrl || "");
   const [isYoutubeEditing, setIsYoutubeEditing] = useState(!candidate.youtubeUrl);
@@ -363,51 +384,26 @@ export default function Dashboard({
   };
 
   const handleUploadSignedContract = async (file) => {
-    if (!file) return;
+    if (!file) return { ok: false };
     setIsUploadingSignedContract(true);
-    const dataUrl = await readFileAsDataUrl(file);
     try {
-      const res = await uploadSignedContractWithBackend(file, candidate.email, candidate.id);
-      const ref = `AA-POTPIS-2026-${String(candidate.id).replace(/[^0-9]/g, "").slice(-4) || "1042"}-${Date.now().toString(36).toUpperCase()}`;
-      const updates = {
-        contractSigned: true,
-        contractDownloaded: true,
-        contractSignedAt: new Date().toISOString(),
-        contractSignedReference: ref,
-        signedContractFileName: file.name,
-        signedContractUploadedAt: new Date().toISOString(),
-        signedContractDataUrl: dataUrl,
-        signedContractUrl: res?.fileUrl || candidate.signedContractUrl,
-        contractVerificationStatus: "pending",
-        contractApproved: false,
-      };
-      updateCandidateState(updates);
+      const res = await uploadSignedContractWithBackend(file, candidate.email);
+      if (!res.success) return { ok: false, error: res.error };
+      // Status ugovora upisuje server; preuzmi ga odatle.
+      const synced = await syncFromBackend();
+      setCandidate((prev) => ({
+        ...(prev || {}),
+        ...(synced?.candidate || {
+          contractSigned: true,
+          contractVerificationStatus: "pending",
+          signedContractFileName: res.fileName,
+          signedContractUrl: res.fileUrl,
+        }),
+      }));
       setShowSignContractModal(false);
-      setUploadToast(
-        res?.message ||
-          `Potpisani ugovor (${file.name}) je uspešno okačen! Uplatnica je otključana, a ugovor je na verifikaciji.`
-      );
+      setUploadToast(res.message || "Potpisan ugovor je okačen. Uplata ti je otvorena, a agencija proverava ugovor.");
       setTimeout(() => setUploadToast(""), 6000);
-    } catch (err) {
-      console.error(err);
-      const ref = `AA-POTPIS-2026-${String(candidate.id).replace(/[^0-9]/g, "").slice(-4) || "1042"}-${Date.now().toString(36).toUpperCase()}`;
-      const updates = {
-        contractSigned: true,
-        contractDownloaded: true,
-        contractSignedAt: new Date().toISOString(),
-        contractSignedReference: ref,
-        signedContractFileName: file.name,
-        signedContractUploadedAt: new Date().toISOString(),
-        signedContractDataUrl: dataUrl,
-        contractVerificationStatus: "pending",
-        contractApproved: false,
-      };
-      updateCandidateState(updates);
-      setShowSignContractModal(false);
-      setUploadToast(
-        `Potpisani ugovor (${file.name}) je uspešno okačen! Uplatnica je otključana, a ugovor je na verifikaciji.`
-      );
-      setTimeout(() => setUploadToast(""), 6000);
+      return { ok: true };
     } finally {
       setIsUploadingSignedContract(false);
     }
@@ -825,9 +821,14 @@ export default function Dashboard({
         className="sr-only"
         tabIndex={-1}
         aria-hidden="true"
-        onChange={(e) => {
-          handleUploadSignedContract(e.target.files?.[0]);
+        onChange={async (e) => {
+          const file = e.target.files?.[0];
           e.target.value = "";
+          const result = await handleUploadSignedContract(file);
+          if (result && !result.ok && result.error) {
+            setUploadToast(result.error);
+            setTimeout(() => setUploadToast(""), 6000);
+          }
         }}
       />
       <input
@@ -910,7 +911,6 @@ export default function Dashboard({
               citizenship: ds160Data.citizenship || candidate.citizenship,
               jmbg: ds160Data.jmbg || candidate.jmbg,
               passportNumber: ds160Data.passportNumber || candidate.passportNumber,
-              idCardNumber: ds160Data.passportNumber || candidate.idCardNumber,
               passportExpiryDate: ds160Data.passportExpiryDate || candidate.passportExpiryDate,
               passportExpiry: ds160Data.passportExpiryDate || candidate.passportExpiry,
               phone: ds160Data.mobilePhone || candidate.phone,
@@ -941,7 +941,6 @@ export default function Dashboard({
           candidate={candidate}
           onClose={() => setShowSignContractModal(false)}
           onUploadSignedContract={(file) => handleUploadSignedContract(file)}
-          onSigned={(signed) => setCandidate((prev) => ({ ...(prev || {}), ...signed }))}
           isUploading={isUploadingSignedContract}
         />
       )}

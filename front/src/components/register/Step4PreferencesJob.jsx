@@ -18,6 +18,8 @@ export default function Step4PreferencesJob({
   setGroupCode,
   onBack,
   onSubmit,
+  submitting = false,
+  submitError = "",
   t,
 }) {
   return (
@@ -146,11 +148,17 @@ export default function Step4PreferencesJob({
         </div>
 
         <div className="pt-2">
+          {submitError && (
+            <p role="alert" className="mb-3 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-800">
+              {submitError}
+            </p>
+          )}
           <button
             type="submit"
-            className="bg-brand text-ink w-full rounded-full px-7 py-3.5 text-sm font-semibold transition-colors hover:bg-brand-strong"
+            disabled={submitting}
+            className="bg-brand text-ink w-full rounded-full px-7 py-3.5 text-sm font-semibold transition-colors hover:bg-brand-strong disabled:opacity-60"
           >
-            {t("reg.completeRegistration")}
+            {submitting ? "Pravim nalog…" : t("reg.completeRegistration")}
           </button>
         </div>
       </form>

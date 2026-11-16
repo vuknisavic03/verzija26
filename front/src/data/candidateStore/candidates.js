@@ -43,6 +43,10 @@ export const DS160_REQUIRED_FIELDS = [
   "employerPhone",
   "homeAddress",
   "mobilePhone",
+  "gender",
+  "tripFunder",
+  "previousUsTravel",
+  "visaRefusal",
   "university",
   "referencePerson1",
   "referencePerson2",
@@ -465,7 +469,7 @@ export function saveCandidate(candidate, options = {}) {
   const candName = `${candFirst} ${candLast}`.trim() || candidate.name || baseCandidate?.name || "";
   const candPhone = (candidate.phone && String(candidate.phone).trim()) || candidate.ds160?.mobilePhone || baseCandidate?.phone || "";
   const candJmbg = candidate.jmbg || candidate.ds160?.jmbg || baseCandidate?.jmbg || "";
-  const candPassNum = candidate.passportNumber || candidate.idCardNumber || candidate.ds160?.passportNumber || baseCandidate?.passportNumber || baseCandidate?.idCardNumber || "";
+  const candPassNum = candidate.passportNumber || candidate.ds160?.passportNumber || baseCandidate?.passportNumber || "";
   const candBirthDate = candidate.birthDate || candidate.dateOfBirth || candidate.ds160?.dateOfBirth || baseCandidate?.birthDate || baseCandidate?.dateOfBirth || "";
   const candExpiryDate = candidate.passportExpiryDate || candidate.passportExpiry || candidate.ds160?.passportExpiryDate || baseCandidate?.passportExpiryDate || baseCandidate?.passportExpiry || "";
   const candGender = candidate.gender || candidate.ds160?.gender || baseCandidate?.gender || "";
@@ -496,16 +500,17 @@ export function saveCandidate(candidate, options = {}) {
     maritalStatus: candMarital || existingDs160.maritalStatus || "",
     employerInfo: existingDs160.employerInfo || (jobEmp ? `${jobEmp} (${jobTitle || "Radna pozicija"})` : ""),
     stayAddress: existingDs160.stayAddress || (jobCity ? `${jobHousing ? `${jobHousing}, ` : ""}${jobCity}, SAD` : ""),
-    supervisorName: existingDs160.supervisorName || (jobEmp ? "HR Department / Supervisor" : ""),
-    employerPhone: existingDs160.employerPhone || (jobEmp ? "+1 (555) 234-5678" : ""),
+    supervisorName: existingDs160.supervisorName || "",
+    employerPhone: existingDs160.employerPhone || "",
   } : (jobEmp ? {
     employerInfo: `${jobEmp} (${jobTitle || "Radna pozicija"})`,
     stayAddress: `${jobHousing ? `${jobHousing}, ` : ""}${jobCity || "SAD"}`,
-    supervisorName: "HR Department / Supervisor",
-    employerPhone: "+1 (555) 234-5678",
-    tripFunder: "Lična sredstva / Work & Travel",
-    previousUsTravel: "Ne",
-    visaRefusal: "Ne",
+    // Nadređeni, telefon i odgovori o vizama: samo iz Job Offera i od kandidata, nikad podrazumevano.
+    supervisorName: "",
+    employerPhone: "",
+    tripFunder: "",
+    previousUsTravel: "",
+    visaRefusal: "",
     firstName: candFirst,
     lastNameAndMaiden: candLast,
     mobilePhone: candPhone,
@@ -661,46 +666,6 @@ export function saveCandidate(candidate, options = {}) {
   return merged;
 }
 
-/**
- * Aktivira kandidata iz Faze 0 (Prijava & Selekcija) i prebacuje ga u Registraciju (Aktivni kandidati).
- */
-export function activateCandidateAccount(candidateIdOrEmail, options = {}) {
-  const list = getCandidates();
-  const searchKey = String(candidateIdOrEmail || "").trim().toLowerCase();
-  const cand = list.find(
-    (c) =>
-      String(c.id).toLowerCase() === searchKey ||
-      (c.email && c.email.toLowerCase() === searchKey)
-  );
-  if (!cand) return null;
-
-  const nowIso = new Date().toISOString();
-  const dateStr = new Date().toLocaleDateString("sr-RS");
-  const code = cand.activationCode || cand.code || `WT-${Math.floor(1000 + Math.random() * 9000)}`;
-
-  const newId = String(cand.id).startsWith("preapp-")
-    ? `cand-${Date.now()}`
-    : cand.id;
-
-  const noteEntry = `[${dateStr}]: Nalog kandidata uspešno AKTIVIRAN. Prebačen u korak: Registracija.`;
-
-  const updatedCandidate = {
-    ...cand,
-    id: newId,
-    code,
-    activationCode: code,
-    status: "review",
-    isRegistered: true,
-    registeredAt: cand.registeredAt || nowIso,
-    selectionDecision: "QUALIFIED",
-    decidedAt: cand.decidedAt || nowIso,
-    notes: cand.notes ? `${cand.notes}\n${noteEntry}` : noteEntry,
-    ...(options.overrides || {}),
-  };
-
-  return saveCandidate(updatedCandidate);
-}
-
 export function deleteCandidate(id) {
   const list = getCandidates();
   const updated = list.filter((c) => c.id !== id);
@@ -835,44 +800,25 @@ export async function uploadDocumentWithBackend(file, type, email, candidateId) 
   };
 }
 
-export async function uploadSignedContractWithBackend(file, email, candidateId) {
-  let res = null;
+/**
+ * Potpisan ugovor: uspeh tek kad ga server primi (od toga zavisi uplata), bez lokalnog „kao da je okačen".
+ * Vraća { success, fileName, fileUrl, message } ili { success: false, error }.
+ */
+export async function uploadSignedContractWithBackend(file, email) {
   try {
-    res = await uploadDocumentWithBackend(file, "signedContract", email, candidateId);
-  } catch (err) {
-    console.warn("Upload signed contract error:", err);
+    const form = new FormData();
+    form.append("file", file);
+    form.append("type", "signedContract");
+    if (email) form.append("email", email);
+    const res = await fetch("/api/public/documents/upload", { method: "POST", body: form, credentials: "include" });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.success === false) {
+      return { success: false, error: data.message || "Ugovor nije okačen. Probaj ponovo." };
+    }
+    return { success: true, fileName: data.fileName || file.name, fileUrl: data.fileUrl, message: data.message };
+  } catch {
+    return { success: false, error: "Nema veze sa serverom. Proveri internet i probaj ponovo." };
   }
-
-  const candidates = loadData(CANDIDATES_KEY, []);
-  const idx = candidates.findIndex(
-    (c) =>
-      (candidateId && String(c.id) === String(candidateId)) ||
-      (email && c.email?.toLowerCase() === email?.toLowerCase())
-  );
-  const nowIso = new Date().toISOString();
-  const ref = `AA-POTPIS-2026-${String(candidateId || "1042").replace(/[^0-9]/g, "").slice(-4) || "1042"}-${Date.now().toString(36).toUpperCase()}`;
-
-  if (idx >= 0) {
-    const c = { ...candidates[idx] };
-    c.contractSigned = true;
-    c.contractDownloaded = true;
-    c.signedContractFileName = file?.name || "Potpisani_Ugovor.pdf";
-    c.signedContractUploadedAt = nowIso;
-    c.contractSignedAt = nowIso;
-    c.contractSignedReference = c.contractSignedReference || ref;
-    c.contractVerificationStatus = c.contractVerificationStatus === "approved" ? "approved" : "pending";
-    c.contractApproved = c.contractVerificationStatus === "approved";
-    c.contractRejectionReason = "";
-    saveCandidate(c);
-  }
-
-  return {
-    success: true,
-    fileName: file?.name || "Potpisani_Ugovor.pdf",
-    message:
-      res?.message ||
-      "Potpisani ugovor i Izjava o odgovornosti su uspešno okačeni! Uplatnica je sada otključana za plaćanje.",
-  };
 }
 
 export async function saveCandidateDs160WithBackend(candidateId, email, ds160) {
@@ -1022,38 +968,28 @@ export function reportInstallmentPayment(candidateIdOrEmail, installmentNumber) 
  * @param {boolean} approved
  * @param {string} note
  */
-export function verifyCandidateContract(candidateIdOrEmail, approved = true, note = "") {
-  const candidates = loadData(CANDIDATES_KEY, []);
-  const idx = candidates.findIndex(
-    (c) =>
-      (candidateIdOrEmail && String(c.id) === String(candidateIdOrEmail)) ||
-      (c.email && c.email.toLowerCase() === String(candidateIdOrEmail).toLowerCase())
-  );
-  if (idx < 0) return null;
-
-  const nowIso = new Date().toISOString();
-  const dateStr = new Date().toLocaleDateString("sr-RS");
-  const c = { ...candidates[idx] };
-  c.contractVerificationStatus = approved ? "approved" : "rejected";
-  c.contractApproved = Boolean(approved);
-  c.contractVerifiedAt = nowIso;
-  if (approved) {
-    c.contractRejectionReason = "";
-    c.contractRejectedAt = null;
-    const log = `[${dateStr}]: Svojeručno potpisani ugovor i Izjava o odgovornosti ODOBRENI.`;
-    c.notes = c.notes ? `${c.notes}\n${log}` : log;
-  } else {
-    c.contractRejectionReason = note || "Potpisani ugovor nije ispravan. Molimo otpremite ponovo.";
-    c.contractRejectedAt = nowIso;
-    if (c.status === "docs" || c.status === "in_review") {
-      c.status = "review";
+/**
+ * Agencija overava ili vraća potpisan ugovor. Izmenu radi server nad svojim zapisom i šalje
+ * kandidatu mejl; uspeh se javlja tek kad server potvrdi. Vraća { ok, candidate } ili { ok: false, error }.
+ */
+export async function verifyCandidateContract(email, approved = true, reason = "") {
+  try {
+    const res = await fetch("/api/public/portal-state", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify({ action: "verifyContract", payload: { approved: Boolean(approved), email, reason } }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.status === 401 || res.status === 403) {
+      return { ok: false, error: "Nisi prijavljen kao agencija u ovom pregledaču. Prijavi se ponovo kao admin." };
     }
-    const log = `[${dateStr}]: Ugovor vraćen na ponovno slanje (${c.contractRejectionReason}).`;
-    c.notes = c.notes ? `${c.notes}\n${log}` : log;
+    if (!res.ok || !data.candidate) return { ok: false, error: data.message || "Izmena nije sačuvana. Probaj ponovo." };
+    const saved = saveCandidate(data.candidate, { skipRemoteSync: true });
+    return { ok: true, candidate: saved };
+  } catch {
+    return { ok: false, error: "Nema veze sa serverom. Proveri internet i probaj ponovo." };
   }
-  if (note) c.contractVerificationNote = note;
-
-  return saveCandidate(c, { explicitStatus: !approved });
 }
 
 /**

@@ -319,7 +319,7 @@ export function markCandidateSelection(candidateId, options = {}) {
  * Tek kada su preduslovi ispunjeni (ili uz eksplicitno administrativno odobrenje),
  * kandidat dobija status 'spreman za kreiranje profila' i izdaje mu se aktivacioni kod za Fazu 1.
  */
-export function approveProfileReadiness(candidateId, options = {}) {
+export async function approveProfileReadiness(candidateId, options = {}) {
   const {
     packageId = "swt-full",
     discount = 0,
@@ -356,13 +356,16 @@ export function approveProfileReadiness(candidateId, options = {}) {
   const finalPrice = Math.max(0, pkg.basePrice - (Number(discount) || 0));
 
   // Kreiraj pozivnicu sa jedinstvenim kodom
-  const newInv = createInvitation({
+  // Server pravi pozivnicu i šalje kandidatu mejl sa kodom.
+  const created = await createInvitation({
     email: cand.email,
     candidateName: `${cand.firstName || ""} ${cand.lastName || ""}`.trim() || cand.name,
     packageId: pkg.id,
     discount: Number(discount) || 0,
     discountNote,
   });
+  if (!created.ok) return { error: created.error };
+  const newInv = created.invitation;
 
   const dateStr = new Date().toLocaleDateString("sr-RS");
   const noteEntry = `[${dateStr} FR-015/BR-002]: Svi preduslovi ispunjeni (selekcija, ugovor, konsultacije). Odobrena spremnost za kreiranje profila. Izdat aktivacioni kod: ${newInv.code}.`;
@@ -386,7 +389,7 @@ export function approveProfileReadiness(candidateId, options = {}) {
   };
 
   saveCandidate(updated);
-  return { candidate: updated, invitation: newInv };
+  return { candidate: updated, invitation: newInv, emailSent: created.emailSent };
 }
 
 /**

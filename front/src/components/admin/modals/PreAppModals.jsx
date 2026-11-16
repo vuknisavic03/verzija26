@@ -4,6 +4,7 @@ import { useTranslation } from "../../../i18n/LanguageContext";
 import {
   PROGRAM_PACKAGES,
   createInvitation,
+  resendInvitationEmail,
   downloadContractPdf,
   downloadResponsibilityStatementPdf,
 } from "../../../data/candidateStore";
@@ -442,7 +443,7 @@ export function ScheduleConsultationModal({ candidate, onSave, onClose }) {
  * FR-015 & BR-002 – Preduslovi za kreiranje profila (Selekcioni Readiness Gate).
  * Proverava da li kandidat zadovoljava 3 striktna preduslova pre izdavanja koda i aktivacije.
  */
-export function ProfileReadinessModal({ candidate, onSave, onActivateDirectly, onClose }) {
+export function ProfileReadinessModal({ candidate, onSave, onClose }) {
   const [packageId, setPackageId] = useState(candidate.packageId || PROGRAM_PACKAGES[0].id);
   const [discount, setDiscount] = useState(String(candidate.discount || 100));
   const [discountNote, setDiscountNote] = useState(candidate.discountNote || "Rana prijava na konsultacijama");
@@ -460,10 +461,10 @@ export function ProfileReadinessModal({ candidate, onSave, onActivateDirectly, o
   const allPrerequisitesMet = isSelectionPassed && isDocsSent && isConsultationAttended;
   const canProceed = allPrerequisitesMet || bypassPrerequisites;
 
-  const handleApprove = (e) => {
+  const handleApprove = async (e) => {
     e.preventDefault();
     if (!canProceed) return;
-    const res = onSave({
+    const res = await onSave({
       packageId,
       discount: Number(discount) || 0,
       discountNote,
@@ -471,14 +472,7 @@ export function ProfileReadinessModal({ candidate, onSave, onActivateDirectly, o
       bypassPrerequisites,
     });
     if (res?.invitation) {
-      setResult(res.invitation);
-    }
-  };
-
-  const handleActivateNow = () => {
-    if (onActivateDirectly) {
-      onActivateDirectly(candidate);
-      onClose();
+      setResult({ ...res.invitation, emailSent: Boolean(res.emailSent) });
     }
   };
 
@@ -496,11 +490,8 @@ export function ProfileReadinessModal({ candidate, onSave, onActivateDirectly, o
       wide
       footer={
         result ? (
-          <div className="flex w-full items-center justify-between">
-            <SecondaryButton onClick={onClose}>Zatvori</SecondaryButton>
-            <PrimaryButton onClick={handleActivateNow}>
-              Aktiviraj nalog odmah (Prebaci u Fazu 1)
-            </PrimaryButton>
+          <div className="flex w-full items-center justify-end">
+            <PrimaryButton onClick={onClose}>Zatvori</PrimaryButton>
           </div>
         ) : (
           <div className="flex w-full items-center justify-between">
@@ -523,8 +514,17 @@ export function ProfileReadinessModal({ candidate, onSave, onActivateDirectly, o
             Kandidat je spreman za profil!
           </h3>
           <p className="text-ink-2">
-            Student <strong>{candidate.name}</strong> je ispunio sve preduslove.
-            Aktivacioni kod je uspešno generisan:
+            {result.emailSent ? (
+              <>
+                Pozivnica sa kodom je poslata na <strong>{candidate.email}</strong>. Kandidat pravi nalog sam, sa
+                svojom lozinkom, i potvrđuje email.
+              </>
+            ) : (
+              <>
+                Kod je napravljen, ali mejl nije poslat na <strong>{candidate.email}</strong>. Pošalji ga iz liste
+                pozivnica ili kandidatu prosledi kod.
+              </>
+            )}
           </p>
 
           <div className="my-4 rounded-2xl border-dashed border-line bg-white p-5">
@@ -544,13 +544,6 @@ export function ProfileReadinessModal({ candidate, onSave, onActivateDirectly, o
               className="inline-flex items-center gap-1.5 rounded-lg border border-line-strong bg-white px-4 py-2 text-xs font-semibold hover:bg-surface-2"
             >
               {copied ? "Kod je kopiran!" : "Kopiraj aktivacioni kod"}
-            </button>
-            <button
-              type="button"
-              onClick={handleActivateNow}
-              className="inline-flex items-center gap-1.5 rounded-lg bg-ink px-5 py-2 text-xs font-bold text-white hover:bg-ink transition-all"
-            >
-              Aktiviraj nalog odmah
             </button>
           </div>
         </div>
@@ -887,26 +880,44 @@ export function GenerateCodeModal({ onCreated, onClose }) {
   const [email, setEmail] = useState("");
   const [candidateName, setCandidateName] = useState("");
   const [packageId, setPackageId] = useState(PROGRAM_PACKAGES[0].id);
-  const [discount, setDiscount] = useState("100");
-  const [discountNote, setDiscountNote] = useState("Rana prijava na razgovoru");
+  const [discount, setDiscount] = useState("0");
+  const [discountNote, setDiscountNote] = useState("");
   const [generatedResult, setGeneratedResult] = useState(null);
+  const [emailSent, setEmailSent] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [resendMessage, setResendMessage] = useState("");
   const [copied, setCopied] = useState(false);
 
   const selectedPkg = PROGRAM_PACKAGES.find((p) => p.id === packageId) || PROGRAM_PACKAGES[0];
   const finalPrice = Math.max(0, selectedPkg.basePrice - (Number(discount) || 0));
 
-  const handleGenerate = (e) => {
+  const handleGenerate = async (e) => {
     e.preventDefault();
-    if (!email.trim()) return;
-    const inv = createInvitation({
+    if (!email.trim() || busy) return;
+    setBusy(true);
+    setError("");
+    const res = await createInvitation({
       email,
       candidateName,
       packageId,
       discount: Number(discount) || 0,
       discountNote,
     });
-    setGeneratedResult(inv);
-    if (onCreated) onCreated(inv);
+    setBusy(false);
+    if (!res.ok) {
+      setError(res.error);
+      return;
+    }
+    setGeneratedResult(res.invitation);
+    setEmailSent(res.emailSent);
+    if (onCreated) onCreated(res.invitation);
+  };
+
+  const resend = async () => {
+    const res = await resendInvitationEmail(generatedResult.code);
+    setResendMessage(res.message);
+    if (res.ok) setEmailSent(true);
   };
 
   const copyCode = () => {
@@ -929,8 +940,8 @@ export function GenerateCodeModal({ onCreated, onClose }) {
             <span />
             <div className="flex items-center gap-2">
               <SecondaryButton onClick={onClose}>{t("admin.cancel")}</SecondaryButton>
-              <PrimaryButton type="submit" onClick={handleGenerate}>
-                {t("admin.generateCodeBtn")}
+              <PrimaryButton type="submit" onClick={handleGenerate} disabled={busy}>
+                {busy ? "Šaljem…" : t("admin.generateCodeBtn")}
               </PrimaryButton>
             </div>
           </>
@@ -945,9 +956,23 @@ export function GenerateCodeModal({ onCreated, onClose }) {
           <h3 className="text-xl font-bold text-ink">
             {t("admin.codeCreatedSuccess")}
           </h3>
-          <p className="text-xs text-ink-2">
-            Kod je generisan i simulirano poslat na: <strong>{generatedResult.email}</strong>
-          </p>
+          {emailSent ? (
+            <p className="text-sm text-ink-2">
+              Pozivnica sa kodom i linkom za registraciju je poslata na <strong>{generatedResult.email}</strong>.
+            </p>
+          ) : (
+            <p className="text-sm text-amber-700">
+              Mejl nije poslat na <strong>{generatedResult.email}</strong>. Pošalji ponovo ili kandidatu prosledi kod
+              ručno.{" "}
+              {resendMessage ? (
+                <span className="text-ink-2">{resendMessage}</span>
+              ) : (
+                <button type="button" onClick={resend} className="font-semibold underline underline-offset-4">
+                  Pošalji ponovo
+                </button>
+              )}
+            </p>
+          )}
 
           <div className="my-5 rounded-2xl border-dashed border-line bg-white p-6">
             <p className="text-[13px] font-semibold text-amber-700">Verifikacioni kod kandidata</p>
@@ -981,6 +1006,7 @@ export function GenerateCodeModal({ onCreated, onClose }) {
           <p className="text-xs text-ink-3">
             {t("admin.generateCodeDesc")}
           </p>
+          {error && <p role="alert" className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
 
           <div className="grid gap-4 sm:grid-cols-2">
             <Field label={t("admin.candidateEmail")}>
