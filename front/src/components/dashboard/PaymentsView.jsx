@@ -1,8 +1,7 @@
 // front/src/components/dashboard/PaymentsView.jsx
 // Sve što ima veze sa novcem, na jednom mestu: plan uplata, uplatnice, računi i popusti.
 import { useEffect, useState } from "react";
-import { Button, cx } from "../ui";
-import { ReceiptIcon } from "./icons";
+import { cx } from "../ui";
 import { Panel, LinkButton, DataList, TaskIcon } from "./ui";
 import { formatUsd } from "../../data/candidateStore";
 import PaymentSlip from "./PaymentSlip";
@@ -13,21 +12,21 @@ const PAY_TONE = { done: "text-emerald-700", wait: "text-amber-700", neutral: "t
 
 function PaymentRow({ id, title, note, amount, tone, statusLabel, children }) {
   return (
-    <li id={id} className="scroll-mt-28 py-4 first:pt-0 last:pb-0">
+    <li id={id} className="scroll-mt-24 py-4">
       <div className="flex items-start justify-between gap-4">
-        <div className="flex min-w-0 gap-3.5">
+        <div className="flex min-w-0 gap-3">
           <TaskIcon state={tone === "done" ? "done" : tone === "wait" ? "wait" : statusLabel === "Kasnije" ? "locked" : "current"} className="mt-0.5" />
           <div className="min-w-0">
-            <p className="text-[15px] font-medium text-ink">{title}</p>
+            <p className={cx("text-[15px]", tone === "done" ? "text-ink-2" : "font-medium text-ink")}>{title}</p>
             {note && <p className="mt-0.5 text-[13px] text-ink-3">{note}</p>}
           </div>
         </div>
         <div className="shrink-0 text-right">
-          {amount && <p className="text-[15px] font-semibold tabular-nums text-ink">{amount}</p>}
+          {amount && <p className="font-sign text-[19px] font-semibold leading-tight text-ink">{amount}</p>}
           <p className={cx("mt-0.5 text-[13px]", PAY_TONE[tone] || PAY_TONE.neutral)}>{statusLabel}</p>
         </div>
       </div>
-      {children && <div className="mt-3 pl-[2.125rem]">{children}</div>}
+      {children && <div className="mt-3 pl-8">{children}</div>}
     </li>
   );
 }
@@ -96,21 +95,17 @@ export default function PaymentsView({ ctx }) {
       : "U celosti";
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-12">
       <Panel
         title="Plan uplata"
         description="Cene su u USD. Plaćaš u dinarima po srednjem kursu NBS na dan uplate."
         aside={
-          <Button variant="outline" size="sm" onClick={() => setShowInvoicesModal(true)} className="h-8 px-3">
-            <ReceiptIcon className="h-4 w-4 text-ink-3" />
-            Fakture
-            {candidateInvoices.length > 0 && (
-              <span className="rounded-full bg-surface-2 px-1.5 text-xs tabular-nums text-ink-2">{candidateInvoices.length}</span>
-            )}
-          </Button>
+          <LinkButton onClick={() => setShowInvoicesModal(true)}>
+            Fakture{candidateInvoices.length > 0 ? ` (${candidateInvoices.length})` : ""}
+          </LinkButton>
         }
       >
-        <ul className="divide-y divide-line">
+        <ul className="divide-y divide-line border-y border-line">
           <PaymentRow
             id="pay-rate1"
             title={isFull ? "Program u celosti" : "I rata"}
@@ -231,7 +226,7 @@ export default function PaymentsView({ ctx }) {
         </ul>
       </Panel>
 
-      <div className="grid gap-4 lg:grid-cols-2">
+      <div className="grid gap-x-12 gap-y-10 sm:grid-cols-2">
         <Panel title="Ugovorena cena">
           <DataList
             cols={1}
@@ -240,16 +235,13 @@ export default function PaymentsView({ ctx }) {
               ["Način plaćanja", modelLabel],
               ...(candidate.discount > 0 ? [["Uračunat popust", formatUsd(candidate.discount)]] : []),
               ...(candidate.guarantor
-                ? [["Jemac", `${candidate.guarantor.name} (${candidate.guarantor.promissoryNotesCount} menice)`]]
+                ? [["Jemac", [candidate.guarantor.name, candidate.guarantor.promissoryNotesCount ? `${candidate.guarantor.promissoryNotesCount} menice` : ""].filter(Boolean).join(", ") || "Upisan"]]
                 : []),
             ]}
           />
         </Panel>
 
-        <Panel
-          title="Popusti i preporuke"
-          description="Popust dodeljuje agencija. Ako imaš kod ili su se prijatelji prijavili preko tebe, javi nam se."
-        >
+        <Panel title="Popusti i preporuke">
           <DataList
             cols={1}
             items={[
@@ -275,6 +267,9 @@ export default function PaymentsView({ ctx }) {
               ],
             ]}
           />
+          <p className="mt-3 text-[13px] leading-relaxed text-ink-3">
+            Popust dodeljuje agencija. Ako imaš kod ili su se prijatelji prijavili preko tebe, javi nam se.
+          </p>
         </Panel>
       </div>
     </div>

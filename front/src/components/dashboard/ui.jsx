@@ -30,90 +30,22 @@ export function StatusPill({ tone = "neutral", className = "", children }) {
   );
 }
 
-/* ---------- Korak ---------- */
-/** Napredak koraka: "3 od 6" i tanka traka. */
-export function Progress({ done, total }) {
-  const pct = total ? Math.round((done / total) * 100) : 0;
-  return (
-    <div className="flex items-center gap-3">
-      <span className="text-[13px] tabular-nums text-ink-3">
-        <span className="font-semibold text-ink">{done}</span> od {total}
-      </span>
-      <span className="h-1.5 w-28 overflow-hidden rounded-full bg-surface-2">
-        <span className="block h-full rounded-full bg-ink transition-[width] duration-500" style={{ width: `${pct}%` }} />
-      </span>
-    </div>
-  );
-}
-
-const INDEX_STATE = {
-  done: "bg-ink text-white",
-  current: "bg-brand text-ink",
-  locked: "bg-surface-2 text-ink-3",
-};
-
-/**
- * StepShell — okvir jednog koraka procesa (Registracija, Korak 1–3).
- *  index:  oznaka u krugu ("1", "2"…)
- *  state:  done | current | locked — boji krug
- *  status: gotov <StatusPill> (opciono)
- */
-export function StepShell({ index, state = "current", kicker, title, description, status, compact = false, progress, children }) {
-  // Prikaz trenutnog koraka: samo naziv i status, bez opisa.
-  if (compact)
-    return (
-      <section>
-        <div className="flex flex-wrap items-end justify-between gap-x-6 gap-y-3">
-          <div>
-            {kicker && <p className="text-[13px] font-medium text-ink-3">{kicker}</p>}
-            <h2 className="mt-0.5 text-xl font-semibold text-ink [font-stretch:100%] tracking-[-0.015em]">{title}</h2>
-          </div>
-          {progress ? <Progress {...progress} /> : status?.props?.tone !== "neutral" && status}
-        </div>
-        <div className="mt-5 space-y-4">{children}</div>
-      </section>
-    );
-  return (
-    <section className="mt-12 first:mt-0">
-      <header className="flex flex-wrap items-start justify-between gap-x-6 gap-y-3">
-        <div className="flex min-w-0 items-start gap-4">
-          <span
-            className={cx(
-              "flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-sm font-bold",
-              INDEX_STATE[state] || INDEX_STATE.current
-            )}
-          >
-            {state === "done" ? <CheckIcon className="h-4.5 w-4.5" strokeWidth={2.5} /> : index}
-          </span>
-          <div className="min-w-0">
-            {kicker && <p className="text-xs font-medium text-ink-3">{kicker}</p>}
-            <h2 className="font-display text-xl font-bold leading-tight text-ink sm:text-2xl">{title}</h2>
-            {description && <p className="mt-1.5 max-w-3xl text-sm leading-relaxed text-ink-2">{description}</p>}
-          </div>
-        </div>
-        {status}
-      </header>
-      <div className="mt-5 space-y-4">{children}</div>
-    </section>
-  );
-}
-
 /* ---------- Panel ---------- */
-/** Panel — bela kartica; naslov i akcija u istom redu, opis ispod. */
+/** Panel — sekcija na beloj strani: naslov i akcija u istom redu, sadržaj ispod. Bez kartice i senke. */
 export function Panel({ title, description, aside, className = "", children }) {
   return (
-    <div className={cx(cardCls, "p-5 sm:p-6", className)}>
+    <section className={className}>
       {(title || aside) && (
-        <div className="mb-4">
-          <div className="flex items-center justify-between gap-4">
-            {title && <h3 className="text-base font-semibold leading-snug text-ink">{title}</h3>}
+        <div className="mb-3">
+          <div className="flex items-baseline justify-between gap-4">
+            {title && <h3 className="text-[13px] font-medium text-ink-3">{title}</h3>}
             {aside}
           </div>
-          {description && <p className="mt-1 max-w-3xl text-sm leading-relaxed text-ink-3">{description}</p>}
+          {description && <p className="mt-1 max-w-2xl text-sm leading-relaxed text-ink-3">{description}</p>}
         </div>
       )}
       {children}
-    </div>
+    </section>
   );
 }
 
@@ -181,11 +113,11 @@ export function TaskIcon({ state, isNext, className = "" }) {
   );
 }
 
-function Chevron({ open }) {
+export function Chevron({ open, side = false }) {
   return (
     <svg
       viewBox="0 0 20 20"
-      className={cx("h-4 w-4 shrink-0 text-ink-3 transition-transform duration-200", open && "rotate-180")}
+      className={cx("h-4 w-4 shrink-0 text-ink-3 transition-transform duration-200", side ? "-rotate-90" : open && "rotate-180")}
       aria-hidden="true"
     >
       <path d="M5.5 8l4.5 4.5L14.5 8" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
@@ -203,22 +135,21 @@ export function openTask(id) {
   window.dispatchEvent(new CustomEvent("portal:open-task", { detail: id }));
 }
 
-export const cardCls =
-  "rounded-2xl border border-line bg-white shadow-[0_1px_2px_rgba(35,31,32,0.04),0_10px_30px_-18px_rgba(35,31,32,0.18)]";
+/** Okvir za retke slučajeve kad sadržaj mora da se odvoji (bez senke). */
+export const cardCls = "rounded-2xl border border-line bg-white";
+
+const AREA_LABEL = { docs: "Dokumenta", pay: "Uplate" };
 
 /**
- * TaskList — tasks: [{ id, title, desc, state, status, render(isNext) }]
- * Otvoren je samo sledeći zadatak; ostali se otvaraju klikom (harmonika).
- *  quiet: korak još nije na redu — nijedan zadatak se ne ističe kao sledeći.
+ * TaskList — tasks: [{ id, title, desc, state, status, area, render(isNext) }]
+ * Redovi na beloj strani, razdvojeni linijom. Zadatak se otvara klikom (opis i njegove kontrole).
+ *  quiet:      korak još nije na redu — nijedan zadatak se ne ističe kao sledeći.
+ *  onNavigate: u Aplikaciji — zadatak koji se radi u drugom tabu (area) vodi tamo umesto da se otvara.
+ * Žuto dugme postoji samo u bloku „sledeći korak" na vrhu, zato lista uvek crta tamna dugmad.
  */
-export function TaskList({ tasks, quiet = false }) {
+export function TaskList({ tasks, quiet = false, onNavigate, className = "" }) {
   const nextId = quiet ? null : nextTaskId(tasks);
-  const [openIds, setOpenIds] = useState(() => new Set(nextId ? [nextId] : []));
-
-  // Kad se zadatak završi, sledeći se sam otvara.
-  useEffect(() => {
-    if (nextId) setOpenIds((prev) => (prev.has(nextId) ? prev : new Set(prev).add(nextId)));
-  }, [nextId]);
+  const [openIds, setOpenIds] = useState(() => new Set());
 
   useEffect(() => {
     const onOpen = (e) => {
@@ -236,50 +167,52 @@ export function TaskList({ tasks, quiet = false }) {
     });
 
   return (
-    <ol className={cx(cardCls, "divide-y divide-line overflow-hidden")}>
+    <ol className={cx("divide-y divide-line border-y border-line", className)}>
       {tasks.map((t) => {
         const isNext = t.id === nextId;
         const muted = t.state === "locked";
-        const body = t.desc || (t.render && !muted);
-        const hasBody = Boolean(body);
-        const isOpen = hasBody && openIds.has(t.id);
-        const content = t.render && !muted ? t.render(isNext) : null;
-        const expandable = hasBody && (t.desc || content);
+        const link = Boolean(onNavigate && t.area);
+        const content = !link && t.render && !muted ? t.render(false) : null;
+        const expandable = !link && Boolean(t.desc || content);
+        const isOpen = expandable && openIds.has(t.id);
+        const tone = STATUS_TONE[t.state] || STATUS_TONE.current;
         return (
-          <li key={t.id} id={`task-${t.id}`} className={cx("scroll-mt-28 transition-colors", isOpen && isNext && "bg-[#fffdf3]")}>
+          <li key={t.id} id={`task-${t.id}`} className="scroll-mt-24">
             <button
               type="button"
-              onClick={() => expandable && toggle(t.id)}
+              onClick={() => (link ? onNavigate(t) : expandable && toggle(t.id))}
               aria-expanded={expandable ? isOpen : undefined}
-              disabled={!expandable}
-              className={cx(
-                "flex w-full items-center gap-3.5 px-5 py-4 text-left sm:px-6",
-                expandable ? "hover:bg-surface/60" : "cursor-default"
-              )}
+              disabled={!link && !expandable}
+              className={cx("group flex w-full items-center gap-3 py-3.5 text-left", !link && !expandable && "cursor-default")}
             >
               <TaskIcon state={t.state} isNext={isNext} />
-              <span
-                className={cx(
-                  "min-w-0 flex-1 truncate text-[15px] font-medium",
-                  muted ? "text-ink-3" : t.state === "done" ? "text-ink-2" : "text-ink"
-                )}
-              >
-                {t.title}
-              </span>
-              {t.status && (
-                <span className={cx("hidden shrink-0 text-[13px] sm:inline", STATUS_TONE[t.state] || STATUS_TONE.current)}>
-                  {t.status}
+              <span className="min-w-0 flex-1">
+                <span
+                  className={cx(
+                    "block truncate text-[15px]",
+                    muted ? "text-ink-3" : t.state === "done" ? "text-ink-2" : "font-medium text-ink"
+                  )}
+                >
+                  {t.title}
                 </span>
+                {t.status && <span className={cx("mt-0.5 block text-[13px] sm:hidden", tone)}>{t.status}</span>}
+              </span>
+              {t.status && <span className={cx("hidden shrink-0 text-[13px] sm:inline", tone)}>{t.status}</span>}
+              {link ? (
+                <span className="flex shrink-0 items-center gap-1 text-[13px] text-ink-3 group-hover:text-ink">
+                  {AREA_LABEL[t.area]}
+                  <Chevron side />
+                </span>
+              ) : expandable ? (
+                <Chevron open={isOpen} />
+              ) : (
+                <span className="w-4 shrink-0" />
               )}
-              {expandable ? <Chevron open={isOpen} /> : <span className="w-4 shrink-0" />}
             </button>
             {isOpen && (
-              <div className="pb-5 pl-[3.375rem] pr-5 sm:pl-[3.625rem] sm:pr-6">
-                {t.status && (
-                  <p className={cx("mb-1 text-[13px] sm:hidden", STATUS_TONE[t.state] || STATUS_TONE.current)}>{t.status}</p>
-                )}
-                {t.desc && <p className="max-w-2xl text-sm leading-relaxed text-ink-2">{t.desc}</p>}
-                {content && <div className={t.desc ? "mt-4" : ""}>{content}</div>}
+              <div className="pb-5 pl-8">
+                {t.desc && <p className="max-w-xl text-sm leading-relaxed text-ink-2">{t.desc}</p>}
+                {content && <div className={t.desc ? "mt-3.5" : ""}>{content}</div>}
               </div>
             )}
           </li>
@@ -363,23 +296,14 @@ export function FileLine({ name, className = "", children }) {
   );
 }
 
-/** Lista "oznaka — vrednost". Na telefonu oznaka stoji iznad vrednosti, na desktopu u istom redu. */
+/** Lista "oznaka — vrednost": oznaka levo, vrednost desno, redovi razdvojeni linijom. */
 export function DataList({ items, cols = 2, className = "" }) {
   return (
-    <dl
-      className={cx(
-        "grid gap-x-8",
-        cols === 3 ? "grid-cols-2 gap-x-4 sm:gap-x-8 lg:grid-cols-3" : cols === 2 ? "sm:grid-cols-2" : "",
-        className
-      )}
-    >
+    <dl className={cx("grid gap-x-12 border-t border-line", cols >= 2 && "sm:grid-cols-2", className)}>
       {items.map(([label, value]) => (
-        <div
-          key={label}
-          className="flex flex-col gap-0.5 border-b border-line py-2.5 last:border-b-0 sm:flex-row sm:items-baseline sm:justify-between sm:gap-4"
-        >
-          <dt className="shrink-0 text-[13px] text-ink-3 sm:text-sm">{label}</dt>
-          <dd className="min-w-0 break-words text-[15px] font-medium text-ink sm:truncate sm:text-right sm:text-sm">{value}</dd>
+        <div key={label} className="flex items-baseline justify-between gap-4 border-b border-line py-3">
+          <dt className="shrink-0 text-sm text-ink-3">{label}</dt>
+          <dd className="min-w-0 break-words text-right text-sm font-medium text-ink">{value}</dd>
         </div>
       ))}
     </dl>
@@ -424,49 +348,4 @@ export function taskTarget(task) {
   if (task?.area === "pay") return ["uplate", PAY_ANCHOR[task.id] || null];
   if (task?.area === "docs") return ["dokumenta", `task-${task.id}`];
   return ["put", task ? `task-${task.id}` : null];
-}
-
-const AREA_LABEL = { docs: "Dokumenta", pay: "Uplate" };
-
-/** Zadaci koraka u Aplikaciji: svoji zadaci, a dokumenta i uplate kao kratki redovi sa linkom. */
-export function StageTasks({ tasks, quiet = false, goTo }) {
-  const own = tasks.filter((t) => !t.area);
-  const linked = tasks.filter((t) => t.area);
-  return (
-    <>
-      {own.length > 0 && <TaskList tasks={own} quiet={quiet} />}
-      {linked.length > 0 && (
-        <section aria-label="Dokumenta i uplate za ovaj korak">
-          <p className="mb-2 text-[13px] text-ink-3">Dokumenta i uplate za ovaj korak</p>
-          <ul className={cx(cardCls, "divide-y divide-line overflow-hidden")}>
-            {linked.map((t) => {
-              const [view, anchor] = taskTarget(t);
-              return (
-                <li key={t.id}>
-                  <button
-                    type="button"
-                    onClick={() => goTo?.(view, anchor)}
-                    className="flex w-full items-center gap-3.5 px-5 py-3 text-left hover:bg-surface/60 sm:px-6"
-                  >
-                    <TaskIcon state={t.state === "current" ? "current" : t.state} className="h-4 w-4" />
-                    <span className={cx("min-w-0 flex-1 truncate text-sm", t.state === "locked" ? "text-ink-3" : "text-ink-2")}>
-                      {t.title}
-                    </span>
-                    {t.status && (
-                      <span className={cx("hidden shrink-0 text-[13px] sm:inline", STATUS_TONE[t.state] || STATUS_TONE.current)}>
-                        {t.status}
-                      </span>
-                    )}
-                    <span className="shrink-0 text-[13px] font-medium text-ink underline decoration-line-strong underline-offset-4">
-                      {AREA_LABEL[t.area]}
-                    </span>
-                  </button>
-                </li>
-              );
-            })}
-          </ul>
-        </section>
-      )}
-    </>
-  );
 }

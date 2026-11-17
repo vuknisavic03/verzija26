@@ -1,12 +1,13 @@
 // front/src/components/dashboard/DashboardHeader.jsx
-// Vrh portala. Telefon i desktop su namerno različiti:
-//  - telefon: kompaktna traka, kartica "sledeći korak" kao jedan dodir, sekcije u donjoj navigaciji (MobileNav)
-//  - desktop: pozdrav, kartica sa dugmetom, sekcije kao kartice u redu sa dugmetom "Moja aplikacija"
+// Vrh portala:
+//  - traka: logo, sekcije (na telefonu su u donjoj navigaciji), nalog
+//  - blok „sledeći korak": uvek kaže čiji je red i, kad je red na studentu, sadrži i kontrole tog zadatka.
+// Boja bloka je signal: žuto = na tebi je red, crvenkasto = vraćeno na ispravku, sivo = red je na agenciji.
 import Logo from "../Logo";
 import { LogoutIcon } from "./icons";
-import { Button, cx } from "../ui";
+import { Button, cx, CheckIcon } from "../ui";
 
-/* ---------- Ikonice sekcija ---------- */
+/* ---------- Ikonice sekcija (donja navigacija) ---------- */
 const ic = { fill: "none", stroke: "currentColor", strokeWidth: 1.7, strokeLinecap: "round", strokeLinejoin: "round" };
 const SectionIcon = {
   put: (p) => (
@@ -36,17 +37,6 @@ const SectionIcon = {
   ),
 };
 
-function TimelineIcon({ className = "h-4 w-4" }) {
-  return (
-    <svg viewBox="0 0 24 24" className={className} aria-hidden="true">
-      <circle cx="5" cy="6" r="1.6" fill="currentColor" />
-      <circle cx="5" cy="12" r="1.6" fill="currentColor" />
-      <circle cx="5" cy="18" r="1.6" fill="currentColor" />
-      <path d="M10 6h10M10 12h10M10 18h10" {...ic} strokeWidth={2} />
-    </svg>
-  );
-}
-
 const SECTIONS = [
   { id: "put", label: "Aplikacija" },
   { id: "dokumenta", label: "Dokumenta" },
@@ -54,64 +44,72 @@ const SECTIONS = [
   { id: "podaci", label: "Moji podaci", short: "Podaci" },
 ];
 
+function Count({ n }) {
+  if (!n) return null;
+  return (
+    <span className="flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-ink px-1 text-[11px] font-semibold tabular-nums text-white">
+      {n}
+    </span>
+  );
+}
+
 /* ---------- Sledeći korak ---------- */
-function NextCard({ next }) {
+const NOW = {
+  do: { box: "bg-brand", label: "Na tebi je red" },
+  fix: { box: "bg-red-50", label: "Vraćeno na ispravku" },
+  wait: { box: "bg-surface", label: "Red je na nama" },
+  done: { box: "bg-surface", label: "Sve je spremno" },
+};
+
+function NowBlock({ next }) {
   if (!next) return null;
-  const quiet = next.kind === "wait" || next.kind === "done";
-  const eyebrow = next.kind === "done" ? "Sve je spremno" : next.kind === "wait" ? "Sada je red na nama" : `Sledeći korak · ${next.stageLabel}`;
+  const kind = next.kind === "do" && next.task?.state === "danger" ? "fix" : next.kind;
+  const look = NOW[kind] || NOW.wait;
+  // Kontrole zadatka (dugmad, kačenje fajla…) — iste one koje zadatak ima u svom tabu.
+  const controls = next.kind === "do" ? next.task?.render?.(false) : null;
+  // Kad student nema šta da radi, blok je manji i mirniji.
+  const active = kind === "do" || kind === "fix";
 
   return (
-    <div
-      className={cx(
-        "rounded-2xl",
-        quiet
-          ? "border border-line bg-white shadow-[0_1px_2px_rgba(35,31,32,0.04),0_10px_30px_-18px_rgba(35,31,32,0.18)]"
-          : "bg-ink text-white shadow-[0_18px_40px_-22px_rgba(35,31,32,0.6)]"
-      )}
-    >
-      {/* Telefon: cela kartica je jedno dugme */}
-      <button type="button" onClick={next.onGo} className="flex w-full items-center gap-4 p-4 text-left sm:hidden">
-        <span className="min-w-0 flex-1">
-          <span className={cx("flex items-center gap-1.5 text-xs font-medium", quiet ? "text-ink-3" : "text-white/55")}>
-            {!quiet && <span className="h-1.5 w-1.5 rounded-full bg-brand" />}
-            {eyebrow}
-          </span>
-          <span className={cx("mt-1 block text-[17px] font-semibold leading-snug", quiet ? "text-ink" : "text-white")}>
-            {next.title}
-          </span>
-          {quiet && next.desc && <span className="mt-1 block text-[13px] leading-snug text-ink-3">{next.desc}</span>}
-        </span>
-        <span
-          aria-hidden="true"
-          className={cx(
-            "flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-lg",
-            quiet ? "border border-line-strong text-ink" : "bg-brand text-ink"
-          )}
-        >
-          →
-        </span>
-      </button>
-
-      {/* Desktop */}
-      <div className="hidden items-center justify-between gap-6 p-6 sm:flex">
-        <div className="min-w-0">
-          <p className={cx("flex items-center gap-2 text-[13px] font-medium", quiet ? "text-ink-3" : "text-white/55")}>
-            {!quiet && <span className="h-1.5 w-1.5 rounded-full bg-brand" />}
-            {eyebrow}
-          </p>
-          <p className={cx("mt-1.5 text-xl font-semibold leading-snug tracking-[-0.01em]", quiet ? "text-ink" : "text-white")}>
-            {next.title}
-          </p>
-          {next.desc && <p className={cx("mt-1 max-w-2xl text-sm", quiet ? "text-ink-2" : "text-white/70")}>{next.desc}</p>}
-        </div>
-        {next.onGo && (
-          <Button variant={quiet ? "outline" : "primary"} onClick={next.onGo}>
-            {next.cta}
-            {!quiet && <span aria-hidden="true">→</span>}
-          </Button>
-        )}
+    <section aria-label="Sledeći korak" className={cx("rounded-3xl px-5 sm:px-9", active ? "py-6 sm:py-9" : "py-5 sm:py-7", look.box)}>
+      <div className="flex items-center justify-between gap-4">
+        <p className={cx("flex items-center gap-2 text-[13px] font-semibold", kind === "fix" ? "text-red-700" : "text-ink")}>
+          {kind === "done" && <CheckIcon className="h-3.5 w-3.5" strokeWidth={3} />}
+          {kind === "wait" && <span className="h-2 w-2 rounded-full bg-amber-400" aria-hidden="true" />}
+          {look.label}
+        </p>
+        {next.stageLabel && <p className="font-sign text-[15px] font-semibold text-ink/70">{next.stageLabel}</p>}
       </div>
-    </div>
+      <h1
+        className={cx(
+          "mt-3 font-display font-bold leading-[1.12] text-ink",
+          active ? "text-[26px] sm:mt-4 sm:text-[34px]" : "text-[21px] sm:text-[26px]"
+        )}
+      >
+        {next.title}
+      </h1>
+      {next.desc && <p className="mt-3 max-w-xl text-[15px] leading-relaxed text-ink/80">{next.desc}</p>}
+      {controls ? (
+        <div className="mt-6">{controls}</div>
+      ) : next.kind === "do" && next.onGo ? (
+        <div className="mt-6">
+          <Button variant="dark" onClick={next.onGo}>
+            {next.cta}
+          </Button>
+        </div>
+      ) : (
+        next.kind === "wait" &&
+        next.onGo && (
+          <button
+            type="button"
+            onClick={next.onGo}
+            className="mt-4 text-[13px] font-medium text-ink underline decoration-line-strong underline-offset-4 hover:decoration-ink"
+          >
+            {next.cta}
+          </button>
+        )
+      )}
+    </section>
   );
 }
 
@@ -137,8 +135,8 @@ export function MobileNav({ view, setView, badges = {} }) {
               <span className="relative">
                 <Icon className="h-6 w-6" aria-hidden="true" />
                 {badges[s.id] ? (
-                  <span className="absolute -right-2 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-brand px-1 text-[10px] font-semibold tabular-nums text-ink">
-                    {badges[s.id]}
+                  <span className="absolute -right-2.5 -top-1">
+                    <Count n={badges[s.id]} />
                   </span>
                 ) : null}
               </span>
@@ -153,51 +151,17 @@ export function MobileNav({ view, setView, badges = {} }) {
 }
 
 /* ---------- Zaglavlje ---------- */
-export default function DashboardHeader({ candidate, logoHref, goHome, onLogout, t, next, view, setView, onOpenTimeline, badges = {} }) {
+export default function DashboardHeader({ candidate, logoHref, goHome, onLogout, t, next, view, setView, badges = {} }) {
   return (
     <>
       <header className="sticky top-0 z-30 border-b border-line bg-white/95 backdrop-blur">
-        <div className="mx-auto flex h-14 max-w-6xl items-center justify-between px-4 sm:h-16 sm:px-8">
-          <a href={logoHref} onClick={goHome} className="flex items-center" aria-label="American Adventure — početna">
+        <div className="mx-auto flex h-14 max-w-5xl items-center gap-8 px-4 sm:h-16 sm:px-8">
+          <a href={logoHref} onClick={goHome} className="flex shrink-0 items-center" aria-label="American Adventure — početna">
             <Logo className="h-8 w-auto sm:h-9" />
           </a>
-          <div className="flex items-center gap-1.5 sm:gap-3">
-            <div className="hidden text-right sm:block">
-              <p className="text-sm font-semibold leading-tight text-ink">
-                {candidate.firstName} {candidate.lastName}
-              </p>
-              <p className="text-xs text-ink-3">{candidate.email}</p>
-            </div>
-            <button
-              type="button"
-              onClick={onOpenTimeline}
-              aria-label="Moja aplikacija"
-              className="flex h-10 w-10 items-center justify-center rounded-full text-ink hover:bg-surface sm:hidden"
-            >
-              <TimelineIcon className="h-5 w-5" />
-            </button>
-            <span className="hidden h-9 w-9 items-center justify-center rounded-full bg-surface-2 text-xs font-semibold text-ink sm:flex">
-              {candidate.firstName?.[0]}
-              {candidate.lastName?.[0]}
-            </span>
-            <Button variant="ghost" size="sm" onClick={onLogout} aria-label={t("dash.logout")} className="h-10 w-10 px-0! sm:w-auto sm:px-3!">
-              <LogoutIcon />
-              <span className="hidden sm:inline">{t("dash.logout")}</span>
-            </Button>
-          </div>
-        </div>
-      </header>
 
-      <div className="mx-auto max-w-6xl px-4 pt-5 sm:px-8 sm:pt-12">
-        <h1 className="font-display text-2xl font-bold leading-[1.1] text-ink sm:text-4xl">Zdravo, {candidate.firstName}</h1>
-
-        <div className="mt-4 sm:mt-8">
-          <NextCard next={next} />
-        </div>
-
-        {/* Desktop: sekcije + Moja aplikacija */}
-        <div className="mt-10 hidden items-center gap-4 border-b border-line sm:flex">
-          <div role="tablist" aria-label="Sekcije portala" className="flex min-w-0 flex-1 gap-7 self-end">
+          {/* Desktop: sekcije u traci */}
+          <div role="tablist" aria-label="Sekcije portala" className="hidden h-full min-w-0 flex-1 items-stretch gap-7 sm:flex">
             {SECTIONS.map((s) => {
               const active = view === s.id;
               return (
@@ -208,21 +172,32 @@ export default function DashboardHeader({ candidate, logoHref, goHome, onLogout,
                   aria-selected={active}
                   onClick={() => setView(s.id)}
                   className={cx(
-                    "-mb-px flex shrink-0 items-center gap-2 border-b-2 pb-3 text-[15px] font-semibold transition-colors",
+                    "-mb-px flex shrink-0 items-center gap-2 border-b-2 text-[15px] font-medium transition-colors",
                     active ? "border-ink text-ink" : "border-transparent text-ink-3 hover:text-ink"
                   )}
                 >
                   {s.label}
-                  {badges[s.id] ? <span className="rounded-full bg-brand px-1.5 text-xs tabular-nums text-ink">{badges[s.id]}</span> : null}
+                  <Count n={badges[s.id]} />
                 </button>
               );
             })}
           </div>
-          <Button variant="outline" size="sm" onClick={onOpenTimeline} className="mb-2.5">
-            <TimelineIcon />
-            Moja aplikacija
-          </Button>
+
+          <div className="ml-auto flex items-center gap-1 sm:gap-2">
+            <span className="hidden text-sm text-ink-2 md:block">
+              {candidate.firstName} {candidate.lastName}
+            </span>
+            <Button variant="ghost" size="sm" onClick={onLogout} aria-label={t("dash.logout")} className="h-10 w-10 px-0! md:w-auto md:px-3!">
+              <LogoutIcon />
+              <span className="hidden md:inline">{t("dash.logout")}</span>
+            </Button>
+          </div>
         </div>
+      </header>
+
+      <div className="mx-auto max-w-3xl px-4 pt-6 sm:px-8 sm:pt-10">
+        <p className="mb-4 text-[15px] text-ink-2 sm:mb-5">Zdravo, {candidate.firstName}</p>
+        <NowBlock next={next} />
       </div>
     </>
   );

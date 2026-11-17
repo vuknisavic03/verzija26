@@ -2,7 +2,7 @@
 // Korak 3: DS-2019 → DS-160 → vizna taksa → Ambasada → III rata / PKZ → orijentacija i let.
 import { Button } from "../ui";
 import { getDs160Status } from "../../data/candidateStore";
-import { StepShell, StageTasks, Actions, LinkButton, Notice, StatusPill } from "./ui";
+import { Actions, LinkButton } from "./ui";
 
 export function isPkz(candidate) {
   return Boolean(
@@ -18,6 +18,14 @@ export function thirdInstallmentAmount(candidate) {
 
 const linkCls = "text-[13px] font-medium text-ink underline decoration-line-strong underline-offset-4 hover:decoration-ink";
 
+const TICKET_LABEL = { PENDING: "Još nije kupljena", BOOKED: "Rezervisana", ISSUED: "Izdata" };
+
+function fmtDay(value) {
+  if (!value) return "";
+  const d = new Date(value);
+  return Number.isNaN(d.getTime()) ? String(value) : d.toLocaleDateString("sr-Latn-RS", { day: "numeric", month: "long", year: "numeric" });
+}
+
 export function buildVisaTasks(ctx) {
   const {
     candidate,
@@ -32,6 +40,8 @@ export function buildVisaTasks(ctx) {
     handleReportVisaFee,
     stepLocked,
   } = ctx;
+  // Spreman za put: orijentacija održana i karta izdata.
+  const tripReady = isReady && candidate.orientationAttended === true && candidate.flightTicketStatus === "ISSUED";
   const ds2019Issued = candidate.ds2019Status === "ISSUED" || isReady;
   const visaFeePaid = Boolean(candidate.visaFeeReportedAt) || isReady;
   const embassyAt = candidate.embassyInterviewDate
@@ -170,41 +180,37 @@ export function buildVisaTasks(ctx) {
         },
     {
       id: "pdo",
+      waitText: "Zakazujemo orijentaciju i avio kartu",
       title: "Orijentacija pred put i avio karta",
-      state: isReady ? "current" : lock("locked"),
-      status: isReady ? "Spremno za polazak" : "Posle vize",
-      desc: "Obavezna sesija pred let: osiguranje, SSN i uputstva za put.",
+      state: !isReady ? lock("locked") : tripReady ? "done" : "wait",
+      status: !isReady
+        ? "Posle vize"
+        : tripReady
+        ? "Spreman za put"
+        : candidate.orientationAttended
+        ? "Orijentacija održana"
+        : "Javljamo termin",
+      desc: tripReady
+        ? candidate.flightDepartureDate
+          ? `Let: ${fmtDay(candidate.flightDepartureDate)} Srećan put!`
+          : "Sve je spremno za put."
+        : "Obavezna sesija pred let: osiguranje, SSN i uputstva za put. Kartu kupujemo mi i javljamo ti detalje.",
+      render: () =>
+        !isReady ? null : (
+          <dl className="grid gap-x-8 gap-y-2 rounded-xl bg-surface px-4 py-3 text-sm sm:grid-cols-2">
+            {[
+              ["Orijentacija", candidate.orientationAttended ? "Održana" : "Još nije održana"],
+              ["Avio karta", TICKET_LABEL[candidate.flightTicketStatus] || TICKET_LABEL.PENDING],
+              ["Polazak", fmtDay(candidate.flightDepartureDate) || "Još nije poznat"],
+              ["Povratak", fmtDay(candidate.flightReturnDate) || "Još nije poznat"],
+            ].map(([k, v]) => (
+              <div key={k} className="flex justify-between gap-4 sm:block">
+                <dt className="text-ink-3">{k}</dt>
+                <dd className="font-medium text-ink">{v}</dd>
+              </div>
+            ))}
+          </dl>
+        ),
     },
   ];
-}
-
-export default function Step3VisaDeparture({ ctx, quiet, compact }) {
-  const { candidate, status, isStep3Done, isSecondInstallmentPaid, isThirdInstallmentPending } = ctx;
-  const isFullPaid = candidate.paymentMethod === "now" || candidate.isFullPaymentPaid;
-  const stepLocked = !isSecondInstallmentPaid && !isFullPaid;
-
-  const tasks = buildVisaTasks({ ...ctx, stepLocked });
-  return (
-    <StepShell
-      compact={compact}
-      progress={{ done: tasks.filter((x) => x.state === "done").length, total: tasks.length }}
-      index="3"
-      state={isStep3Done ? "done" : stepLocked ? "locked" : "current"}
-      kicker="Korak 3"
-      title={isFullPaid ? "Viza i polazak" : "Viza, III rata i polazak"}
-      description="Upitnik za vizu, razgovor u ambasadi i priprema za let."
-      status={
-        <StatusPill tone={isStep3Done ? "done" : isThirdInstallmentPending || status === "departure" ? "wait" : "neutral"}>
-          {isStep3Done ? "Viza odobrena" : stepLocked ? "Otvara se posle Koraka 2" : status === "departure" ? "Ambasada u pripremi" : "U toku"}
-        </StatusPill>
-      }
-    >
-      {status === "ready" && (
-        <Notice tone="done" title="Čestitamo — J-1 viza je odobrena">
-          Pasoš sa vizom te čeka u agenciji. Ostala je još orijentacija pred put.
-        </Notice>
-      )}
-      <StageTasks tasks={tasks} quiet={quiet || stepLocked} goTo={ctx.goTo} />
-    </StepShell>
-  );
 }

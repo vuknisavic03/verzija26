@@ -79,6 +79,7 @@ const ADMIN_ONLY_FIELDS = new Set([
   'flightTicketStatus',
   'flightDepartureDate',
   'flightReturnDate',
+  'orientationAttended',
   // Potpis ugovora postavlja samo server (prihvatanje u portalu ili otpremljen skeniran ugovor).
   'contractAcceptance',
   'contractSigned',

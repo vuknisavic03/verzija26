@@ -28,7 +28,6 @@ import {
   CheckIcon,
   PlusIcon,
   SearchIcon,
-  EditIcon,
   TrashIcon,
   PhoneIcon,
   CalendarIcon,
@@ -41,7 +40,6 @@ import {
   SecondaryButton,
   Card,
   EmptyState,
-  StatCard,
   Badge,
   GhostIconButton,
 } from "./ui";
@@ -56,8 +54,9 @@ import {
 } from "./modals/PreAppModals";
 import CandidateApplicationModal from "./modals/CandidateApplicationModal";
 import { candidateQueue } from "./queue";
+import { Chevron } from "../dashboard/ui";
 
-export default function UsersSection({ openCandidateId = null, onOpened = () => {} }) {
+export default function UsersSection({ openCandidateId = null, openTab = null, onOpened = () => {} }) {
   const { t } = useTranslation();
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState("all");
@@ -120,6 +119,7 @@ export default function UsersSection({ openCandidateId = null, onOpened = () => 
   }, []);
 
   const [selectedCandidate, setSelectedCandidate] = useState(null);
+  const [selectedTab, setSelectedTab] = useState(null);
   const [copiedCode, setCopiedCode] = useState("");
 
   // Otvaranje dosijea sa Pregleda (početne admina)
@@ -128,6 +128,7 @@ export default function UsersSection({ openCandidateId = null, onOpened = () => 
     const c = getCandidates().find((x) => String(x.id) === String(openCandidateId));
     if (c) {
       setActiveTab("candidates");
+      setSelectedTab(openTab);
       setSelectedCandidate(c);
     }
     onOpened();
@@ -537,37 +538,18 @@ export default function UsersSection({ openCandidateId = null, onOpened = () => 
       (s.program && s.program.toLowerCase().includes(q));
     const matchF =
       filter === "all" ||
+      (filter === "waiting" && candidateQueue(s).length > 0) ||
       s.status === filter ||
       (filter === "review" && s.status === "registered") ||
       (filter === "docs" && s.status === "in_review");
     return matchQ && matchF;
   });
+  // Prvo kandidati kod kojih je red na agenciji.
+  const waitingCount = activeProgramCandidates.filter((s) => candidateQueue(s).length > 0).length;
+  rows.sort((a, b) => (candidateQueue(b).length > 0) - (candidateQueue(a).length > 0));
 
   // KPI kartice
-  const preAppKpis = [
-    { label: "Nove prijave", value: preAppsList.length },
-    {
-      label: "Čeka poziv",
-      value: preAppsList.filter((s) => !s.contactStatus || s.contactStatus === "NOT_ATTEMPTED").length,
-      accent: true,
-    },
-    {
-      label: "Konsultacije",
-      value: preAppsList.filter((s) => s.consultationStatus === "SCHEDULED" || s.consultationStatus === "ATTENDED").length,
-    },
-    {
-      label: "Dobili kod",
-      value: preAppsList.filter((s) => s.selectionDecision === "QUALIFIED" || Boolean(s.activationCode)).length,
-      accent: true,
-    },
-  ];
 
-  const candidateKpis = [
-    { label: "U programu", value: activeProgramCandidates.length },
-    { label: "Aktivni", value: activeProgramCandidates.filter((s) => s.status !== "ready").length },
-    { label: "Pozivnice", value: invitations.filter((i) => i.status === "pending").length, accent: true },
-    { label: "Viza odobrena", value: activeProgramCandidates.filter((s) => s.status === "ready").length, accent: true },
-  ];
 
   const preAppFilters = [
     ["all", "Sve"],
@@ -581,6 +563,7 @@ export default function UsersSection({ openCandidateId = null, onOpened = () => 
 
   const filters = [
     ["all", t("admin.usersAll")],
+    ["waiting", `Čeka tebe${waitingCount ? ` (${waitingCount})` : ""}`],
     ["review", "Registracija"],
     ["docs", "Korak 1"],
     ["job", "Korak 2"],
@@ -643,15 +626,6 @@ export default function UsersSection({ openCandidateId = null, onOpened = () => 
           </button>
         ))}
       </div>
-
-      {/* Brojke za izabrani tab */}
-      {activeTab !== "invitations" && (
-        <div className="mb-6 grid grid-cols-2 gap-3 lg:grid-cols-4">
-          {(activeTab === "preApplications" ? preAppKpis : candidateKpis).map((k) => (
-            <StatCard key={k.label} label={k.label} value={k.value} accent={k.accent} />
-          ))}
-        </div>
-      )}
 
       {/* ================================================================ */}
       {/* 1. PRIKAZ TAB-A: FAZA 0 — PRIJAVE, TRIJAŽA, KONSULTACIJE & GATE */}
@@ -1116,90 +1090,35 @@ export default function UsersSection({ openCandidateId = null, onOpened = () => 
           {rows.length === 0 ? (
             <EmptyState>{t("admin.usersEmpty")}</EmptyState>
           ) : (
-            <Card className="overflow-hidden">
-              {/* Zaglavlje tabele */}
-              <div className="hidden grid-cols-[1.8fr_1.2fr_1.4fr_auto] gap-4 border-b border-line px-5 py-3 text-[13px] font-semibold text-ink-3 md:grid items-center">
-                <span>{t("admin.colStudent")}</span>
-                <span>{t("admin.colProgram")}</span>
-                <span>Trenutni korak</span>
-                <span className="text-right">Akcije</span>
-              </div>
-              <ul className="divide-y divide-line">
-                {rows.map((s) => {
-                  const stepInfo = getCandidateStepInfo(s);
-                  return (
-                  <li
-                    key={s.id}
-                    className="grid grid-cols-1 gap-3 px-5 py-4 transition-colors hover:bg-surface md:grid-cols-[1.8fr_1.2fr_1.4fr_auto] md:items-center md:gap-4"
-                  >
-                    <div
+            // Lista: ceo red otvara dosije; prvo se vidi šta čeka agenciju.
+            <ul className="divide-y divide-line border-y border-line">
+              {rows.map((s) => {
+                const stepInfo = getCandidateStepInfo(s);
+                const q = candidateQueue(s);
+                return (
+                  <li key={s.id} className="group flex items-center gap-3">
+                    <button
+                      type="button"
                       onClick={() => setSelectedCandidate(s)}
-                      className="flex cursor-pointer items-center gap-3 min-w-0"
+                      className="flex min-w-0 flex-1 items-center gap-4 py-3.5 text-left"
                     >
-                      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-surface-2 text-xs font-semibold text-ink">
-                        {s.name.split(" ").map((n) => n[0]).join("").slice(0, 2)}
+                      <span className={`h-2 w-2 shrink-0 rounded-full ${q.length ? "bg-amber-400" : "bg-transparent"}`} aria-hidden="true" />
+                      <span className="min-w-0 flex-1 md:flex md:items-baseline md:gap-4">
+                        <span className="block truncate text-[15px] font-medium text-ink md:w-56 md:shrink-0">{s.name}</span>
+                        <span className={`block truncate text-[13px] md:text-sm ${q.length ? "font-medium text-amber-800" : "text-ink-3"}`}>
+                          {q.length ? q.map((x) => x.title).join(" · ") : stepInfo.subLabel}
+                        </span>
                       </span>
-                      <span className="min-w-0">
-                        <span className="block truncate text-sm font-semibold text-ink">{s.name}</span>
-                        <div className="flex flex-wrap items-center gap-1.5 mt-0.5">
-                          <span className="truncate text-xs text-ink-3">{s.email}</span>
-                          {(() => {
-                            const q = candidateQueue(s);
-                            return q.length ? (
-                              <span className="inline-flex items-center gap-1 text-xs font-medium text-amber-700" title={q.map((x) => x.title).join(", ")}>
-                                <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
-                                {q.length === 1 ? q[0].title : `${q.length} čeka tebe`}
-                              </span>
-                            ) : null;
-                          })()}
-                        </div>
-                      </span>
-                    </div>
-
-                    <span
-                      onClick={() => setSelectedCandidate(s)}
-                      className="cursor-pointer truncate text-sm text-ink-2"
-                    >
-                      {s.program}
-                    </span>
-
-                    <div
-                      onClick={() => setSelectedCandidate(s)}
-                      className="flex cursor-pointer flex-col gap-1 min-w-0"
-                    >
-                      <span className="inline-flex w-fit items-center gap-1.5 rounded-full border border-line bg-white px-2.5 py-0.5 text-xs font-medium text-ink-2">
-                        <span className={`h-1.5 w-1.5 rounded-full ${stepInfo.dotCls}`} />
-                        {stepInfo.stepTitle}
-                      </span>
-                      <span className="truncate text-xs font-medium text-ink-2" title={stepInfo.subLabel}>
-                        {stepInfo.subLabel}
-                      </span>
-                    </div>
-
-                    {/* Akciona dugmad */}
-                    <div className="flex items-center justify-end gap-1">
-                      <button
-                        type="button"
-                        onClick={() => setSelectedCandidate(s)}
-                        className="inline-flex items-center gap-1 rounded-lg border border-line bg-white px-2.5 py-1.5 text-xs font-semibold text-ink transition-colors hover:bg-surface-2"
-                        title="Izmeni podatke aplikacije"
-                      >
-                        <EditIcon className="h-3.5 w-3.5" />
-                        <span className="hidden lg:inline">Dosije</span>
-                      </button>
-                      <GhostIconButton
-                        label="Obriši"
-                        danger
-                        onClick={() => handleDeleteCandidate(s.id, s.name)}
-                      >
-                        <TrashIcon className="h-3.5 w-3.5" />
-                      </GhostIconButton>
-                    </div>
+                      <span className="hidden shrink-0 text-[13px] text-ink-3 lg:inline">{stepInfo.stepTitle}</span>
+                      <Chevron side />
+                    </button>
+                    <GhostIconButton label={`Obriši ${s.name}`} danger onClick={() => handleDeleteCandidate(s.id, s.name)}>
+                      <TrashIcon className="h-3.5 w-3.5" />
+                    </GhostIconButton>
                   </li>
-                  );
-                })}
-              </ul>
-            </Card>
+                );
+              })}
+            </ul>
           )}
         </>
       )}
@@ -1210,9 +1129,14 @@ export default function UsersSection({ openCandidateId = null, onOpened = () => 
       {selectedCandidate && (
         <CandidateApplicationModal
           candidate={selectedCandidate}
+          // Otvara se kartica na kojoj agencija ima posla (prva stavka iz „Čeka tebe").
+          initialTab={selectedTab || candidateQueue(selectedCandidate)[0]?.tab || "overview"}
           onSave={handleSaveCandidate}
           onSaved={handleCandidateSaved}
-          onClose={() => setSelectedCandidate(null)}
+          onClose={() => {
+            setSelectedCandidate(null);
+            setSelectedTab(null);
+          }}
         />
       )}
 

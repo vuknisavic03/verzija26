@@ -29,12 +29,12 @@ import ProfileBuilderModal from "./ProfileBuilderModal";
 import JobFairModal from "./JobFairModal";
 
 import DashboardHeader, { MobileNav } from "./dashboard/DashboardHeader";
-import ApplicationTimeline from "./dashboard/ApplicationTimeline";
+import Timeline from "./dashboard/Timeline";
 import { openTask, taskTarget } from "./dashboard/ui";
-import Step0Registration, { buildRegistrationTasks } from "./dashboard/Step0Registration";
-import Step1Documents, { buildDocumentTasks } from "./dashboard/Step1Documents";
-import Step2JobPlacement, { buildJobTasks } from "./dashboard/Step2JobPlacement";
-import Step3VisaDeparture, { buildVisaTasks } from "./dashboard/Step3VisaDeparture";
+import { buildRegistrationTasks } from "./dashboard/Step0Registration";
+import { buildDocumentTasks } from "./dashboard/Step1Documents";
+import { buildJobTasks } from "./dashboard/Step2JobPlacement";
+import { buildVisaTasks } from "./dashboard/Step3VisaDeparture";
 import DocumentsView from "./dashboard/DocumentsView";
 import PaymentsView from "./dashboard/PaymentsView";
 import ProfileView from "./dashboard/ProfileView";
@@ -511,7 +511,6 @@ export default function Dashboard({
 
   // Sekcija portala: "put" (koraci) | "dokumenta" | "uplate" | "podaci"
   const [view, setView] = useState("put");
-  const [showTimeline, setShowTimeline] = useState(false);
   const changeView = (v) => {
     setView(v);
     window.scrollTo({ top: 0, behavior: "instant" });
@@ -692,13 +691,21 @@ export default function Dashboard({
     {
       id: "reg",
       label: "Registracija",
-      title: payNow ? "Ugovor i uplata" : "Ugovor i I rata",
+      title: payNow ? "Ugovor i uplata programa" : "Ugovor i I rata",
       done: isRegistrationDone,
       quiet: false,
       tasks: buildRegistrationTasks(ctx),
-      state: isRegistrationDone ? "done" : isFirstInstallmentPending || isContractPending ? "wait" : "current",
+      state: isRegistrationDone
+        ? "done"
+        : candidate.contractVerificationStatus === "rejected"
+        ? "danger"
+        : isFirstInstallmentPending || isContractPending
+        ? "wait"
+        : "current",
       note: isRegistrationDone
         ? "Završeno"
+        : candidate.contractVerificationStatus === "rejected"
+        ? "Ugovor vraćen na ispravku"
         : isFirstInstallmentPending
         ? "Proveravamo uplatu"
         : isContractPending
@@ -728,7 +735,7 @@ export default function Dashboard({
     {
       id: "step2",
       label: "Korak 2",
-      title: fullyPaid ? "Posao i Job Offer" : "Posao i II rata",
+      title: fullyPaid ? "Posao i Job Offer" : "Posao, Job Offer i II rata",
       done: isStep2Done,
       quiet: !isDocumentsApproved,
       tasks: buildJobTasks(ctx),
@@ -764,13 +771,15 @@ export default function Dashboard({
     {
       id: "step3",
       label: "Korak 3",
-      title: isStep3Done ? "Viza odobrena" : "Viza i polazak",
+      title: fullyPaid ? "Viza i polazak" : "Viza, III rata i polazak",
       done: isStep3Done,
       quiet: step3Locked,
       tasks: buildVisaTasks({ ...ctx, stepLocked: step3Locked }),
       state: isStep3Done ? "done" : isThirdInstallmentPending ? "wait" : status === "departure" ? "current" : "locked",
       note: isStep3Done
-        ? "Spreman za let"
+        ? candidate.orientationAttended === true && candidate.flightTicketStatus === "ISSUED"
+          ? "Spreman za put"
+          : "Viza odobrena"
         : isThirdInstallmentPending
         ? "Proveravamo III ratu"
         : status === "departure"
@@ -788,7 +797,12 @@ export default function Dashboard({
       const pdo = stages[3].tasks.find((x) => x.id === "pdo");
       return {
         kind: "done",
-        title: "Viza je odobrena — vidimo se na orijentaciji",
+        title:
+          pdo?.state === "done"
+            ? "Spreman si za put"
+            : candidate.orientationAttended
+            ? "Orijentacija je održana — čekamo avio kartu"
+            : "Viza je odobrena — vidimo se na orijentaciji",
         desc: pdo?.desc,
         cta: "Pogledaj Korak 3",
         onGo: () => goTo("put", "task-pdo", "step3"),
@@ -802,6 +816,9 @@ export default function Dashboard({
         kind: "do",
         stageLabel: currentStage.label,
         title: todo.title,
+        desc: typeof todo.desc === "string" ? todo.desc : undefined,
+        // Blok na vrhu crta kontrole ovog zadatka, pa student ne mora da ga traži po tabovima.
+        task: todo,
         cta: todo.state === "danger" ? "Reši" : "Kreni",
         onGo: () => goTo(targetView, anchor, currentStage.id),
       };
@@ -810,6 +827,7 @@ export default function Dashboard({
       currentStage.tasks.find((x) => x.state === "wait" && x.waitText) || currentStage.tasks.find((x) => x.state === "wait");
     return {
       kind: "wait",
+      stageLabel: currentStage.label,
       title: waiting?.waitText || waiting?.title || "Proveravamo tvoje podatke",
       desc: waiting?.desc || "Javljamo ti se čim završimo. Ne moraš ništa da radiš.",
       cta: "Detalji",
@@ -823,69 +841,52 @@ export default function Dashboard({
   // Tab Dokumenta prikazuje dokumenta po koracima, istim redom kao proces.
   ctx.stages = stages;
 
-  const paymentDue =
-    (hasSignedContract && !isFirstInstallmentPaid && !isFirstInstallmentPending ? 1 : 0) +
-    (!fullyPaid && hasConfirmedJob && !isSecondInstallmentPaid && !isSecondInstallmentPending ? 1 : 0);
 
-  const stepProps = (id) => ({ ctx, quiet: stages.find((s) => s.id === id)?.quiet, compact: true });
+  // Broj stvari koje student sada treba da uradi u tabu (dokumenta i uplate).
+  const actionable = (t) => t.state === "current" || t.state === "danger";
+  const countArea = (area) =>
+    stages.reduce(
+      (n, st) => n + (st.quiet || st.state === "locked" ? 0 : st.tasks.filter((t) => t.area === area && actionable(t)).length),
+      0
+    );
+  const badges = { dokumenta: countArea("docs"), uplate: countArea("pay") };
+
   const currentStageId = currentStage?.id || "step3";
+  // Otvoren korak u Aplikaciji: onaj koji je na redu, dok student sam ne otvori drugi ("none" = svi skupljeni).
   const shownStage = activeStepTab === "all" ? currentStageId : activeStepTab;
 
   return (
-    <div className="min-h-screen bg-surface text-ink">
+    <div className="min-h-screen bg-white text-ink">
       <DashboardHeader
         candidate={candidate}
         logoHref={logoHref}
         goHome={goHome}
         onLogout={onLogout}
         t={t}
-        onOpenTimeline={() => setShowTimeline(true)}
         next={next}
         view={view}
         setView={setView}
-        badges={{ uplate: paymentDue }}
+        badges={badges}
       />
 
-      <main id="portal-sections" className="mx-auto max-w-6xl px-4 pb-32 pt-7 sm:px-8 sm:pb-24 sm:pt-8">
-        {view !== "put" && (
-          <h2 className="mb-4 text-xl font-semibold text-ink [font-stretch:100%] tracking-[-0.015em] sm:hidden">
-            {{ dokumenta: "Dokumenta", uplate: "Uplate", podaci: "Moji podaci" }[view]}
-          </h2>
-        )}
+      <main id="portal-sections" className="mx-auto max-w-3xl px-4 pb-32 pt-8 sm:px-8 sm:pb-24 sm:pt-10">
+        <h2 className="sr-only">{{ put: "Aplikacija", dokumenta: "Dokumenta", uplate: "Uplate", podaci: "Moji podaci" }[view]}</h2>
         {view === "put" && (
-          <>
-            {shownStage !== currentStageId && (
-              <button
-                type="button"
-                onClick={() => setActiveStepTab(currentStageId)}
-                className="mb-5 inline-flex items-center gap-1.5 text-[13px] font-medium text-ink-3 hover:text-ink"
-              >
-                <span aria-hidden="true">←</span> Nazad na trenutni korak
-              </button>
-            )}
-            {shownStage === "reg" && <Step0Registration {...stepProps("reg")} />}
-            {shownStage === "step1" && <Step1Documents {...stepProps("step1")} />}
-            {shownStage === "step2" && <Step2JobPlacement {...stepProps("step2")} />}
-            {shownStage === "step3" && <Step3VisaDeparture {...stepProps("step3")} />}
-          </>
+          <Timeline
+            stages={stages}
+            currentId={currentStageId}
+            openId={shownStage}
+            onToggle={(id) => setActiveStepTab(id || "none")}
+            goTo={goTo}
+          />
         )}
         {view === "dokumenta" && <DocumentsView ctx={ctx} />}
         {view === "uplate" && <PaymentsView ctx={ctx} />}
         {view === "podaci" && <ProfileView ctx={ctx} />}
       </main>
 
-      <MobileNav view={view} setView={changeView} badges={{ uplate: paymentDue }} />
+      <MobileNav view={view} setView={changeView} badges={badges} />
 
-      <ApplicationTimeline
-        open={showTimeline}
-        onClose={() => setShowTimeline(false)}
-        stages={stages}
-        currentId={currentStageId}
-        onOpenStage={(id) => {
-          setShowTimeline(false);
-          goTo("put", null, id);
-        }}
-      />
 
       {/* Fajl-inputi (jedno mesto za sva kačenja) */}
       <input

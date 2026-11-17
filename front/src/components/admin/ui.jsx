@@ -288,8 +288,8 @@ export const NAV = [
 ];
 
 /* ---------- UI KOMPONENTE ---------- */
-const CARD =
-  "rounded-2xl border border-line bg-white shadow-[0_1px_2px_rgba(35,31,32,0.04),0_10px_30px_-18px_rgba(35,31,32,0.18)]";
+// Okvir bez senke: struktura ide linijama, na beloj strani.
+const CARD = "rounded-2xl border border-line bg-white";
 
 export function PageHeader({ title, subtitle, action }) {
   return (
@@ -379,7 +379,7 @@ export function GhostIconButton({ onClick, label, children, danger = false }) {
       aria-label={label}
       title={label}
       className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition-colors duration-150 ${
-        danger ? "text-red-500 hover:border-red-200 bg-white" : "text-ink-3 hover:bg-surface-2 hover:text-ink"
+        danger ? "text-ink-3 hover:bg-red-50 hover:text-red-600" : "text-ink-3 hover:bg-surface-2 hover:text-ink"
       }`}
     >
       {children}

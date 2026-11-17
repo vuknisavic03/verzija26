@@ -36,6 +36,7 @@ export default function AdminPanel({ onLogout = () => {}, onNavigate = () => {},
   const { t } = useTranslation();
   const [section, setSection] = useState("overview");
   const [openCandidateId, setOpenCandidateId] = useState(null);
+  const [openTab, setOpenTab] = useState(null);
   const [moreOpen, setMoreOpen] = useState(false);
 
   const navLabel = (item) => (item.labelKey && t(item.labelKey) !== item.labelKey ? t(item.labelKey) : item.defaultLabel || item.id);
@@ -62,14 +63,15 @@ export default function AdminPanel({ onLogout = () => {}, onNavigate = () => {},
         return (
           <OverviewSection
             onGoTo={select}
-            onOpenCandidate={(id) => {
+            onOpenCandidate={(id, tab) => {
               setOpenCandidateId(id);
+              setOpenTab(tab || null);
               select("users");
             }}
           />
         );
       case "users":
-        return <UsersSection openCandidateId={openCandidateId} onOpened={() => setOpenCandidateId(null)} />;
+        return <UsersSection openCandidateId={openCandidateId} openTab={openTab} onOpened={() => setOpenCandidateId(null)} />;
       case "jobs":
         return <JobsSection />;
       case "finances":
@@ -92,7 +94,7 @@ export default function AdminPanel({ onLogout = () => {}, onNavigate = () => {},
   const moreActive = moreItems.some((n) => n.id === section);
 
   return (
-    <div className="flex min-h-screen bg-surface text-ink">
+    <div className="flex min-h-screen bg-white text-ink">
       {/* Bočna navigacija (desktop) */}
       <aside className="sticky top-0 hidden h-screen w-60 shrink-0 flex-col border-r border-line bg-white md:flex">
         <div className="flex h-16 items-center gap-2.5 px-5">

@@ -2,7 +2,7 @@
 // Registracija: ugovor → prva uplata. Program, popusti i uplatnice žive u sekcijama "Uplate" i "Moji podaci".
 import { Button } from "../ui";
 import { UploadIcon } from "./icons";
-import { StepShell, StageTasks, Actions, LinkButton, FileLine, StatusPill, RemoveFileButton } from "./ui";
+import { Actions, LinkButton, FileLine, RemoveFileButton } from "./ui";
 import { downloadContractPdf, downloadResponsibilityStatementPdf } from "../../data/candidateStore";
 
 export function firstPaymentAmount(candidate) {
@@ -48,13 +48,22 @@ export function buildRegistrationTasks(ctx) {
       desc: isContractApproved
         ? null
         : contractRejected
-        ? `Agencija je vratila ugovor${candidate.contractRejectionReason ? `: ${candidate.contractRejectionReason}` : "."} Okači ispravno potpisan ugovor (dugme „Zameni").`
+        ? `Agencija je vratila ugovor${candidate.contractRejectionReason ? `: ${String(candidate.contractRejectionReason).replace(/[.\s]+$/, "")}.` : "."} Okači ispravno potpisan ugovor.`
         : isContractPending
         ? "Proveravamo potpise. Uplatnicu već možeš da preuzmeš."
         : "Ugovor i izjava su već popunjeni tvojim podacima — odštampaj, potpiši i okači sken.",
       render: (isNext) => (
         <Actions>
-          {hasSignedContract ? (
+          {hasSignedContract && contractRejected ? (
+            // Vraćen ugovor: jedna jasna radnja — okači ispravljen.
+            <>
+              <Button variant="dark" size="sm" disabled={isUploadingSignedContract} onClick={pickSignedContract}>
+                <UploadIcon className="h-4 w-4" />
+                {isUploadingSignedContract ? "Kačenje…" : "Okači ispravljen ugovor"}
+              </Button>
+              <FileLine name={candidate.signedContractFileName || "Potpisani ugovor"} />
+            </>
+          ) : hasSignedContract ? (
             <FileLine name={candidate.signedContractFileName || "Potpisani ugovor"}>
               <LinkButton onClick={pickSignedContract} disabled={isUploadingSignedContract} className="ml-1">
                 Zameni
@@ -116,29 +125,4 @@ export function buildRegistrationTasks(ctx) {
         ),
     },
   ];
-}
-
-export default function Step0Registration({ ctx, quiet, compact }) {
-  const { candidate, isRegistrationDone, isFirstInstallmentPending, isContractPending } = ctx;
-  const isFull = candidate.paymentMethod === "now";
-
-  const tasks = buildRegistrationTasks(ctx);
-  return (
-    <StepShell
-      compact={compact}
-      progress={{ done: tasks.filter((x) => x.state === "done").length, total: tasks.length }}
-      index="0"
-      state={isRegistrationDone ? "done" : "current"}
-      kicker="Registracija"
-      title={isFull ? "Ugovor i uplata programa" : "Ugovor i I rata"}
-      description="Dve stvari i otvaraš Korak 1: potpisan ugovor i prva uplata."
-      status={
-        <StatusPill tone={isRegistrationDone ? "done" : isFirstInstallmentPending || isContractPending ? "wait" : "neutral"}>
-          {isRegistrationDone ? "Završeno" : isFirstInstallmentPending || isContractPending ? "Čeka našu potvrdu" : "U toku"}
-        </StatusPill>
-      }
-    >
-      <StageTasks tasks={tasks} quiet={quiet} goTo={ctx.goTo} />
-    </StepShell>
-  );
 }

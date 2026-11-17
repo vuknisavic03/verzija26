@@ -3,7 +3,7 @@
 // Lični podaci su u "Moji podaci", a svi fajlovi i prevodi i u sekciji "Dokumenta".
 import { Button } from "../ui";
 import { UploadIcon, SparklesIcon } from "./icons";
-import { StepShell, StageTasks, Actions, LinkButton, FileLine, Notice, StatusPill, RemoveFileButton } from "./ui";
+import { Actions, LinkButton, FileLine, RemoveFileButton } from "./ui";
 import { translationState, getTranslation } from "../../data/candidateStore";
 
 export function buildDocumentTasks(ctx) {
@@ -263,44 +263,4 @@ export function buildDocumentTasks(ctx) {
         ),
     },
   ];
-}
-
-export default function Step1Documents({ ctx, quiet, compact }) {
-  const { candidate, isRegistrationDone, isStep1Done, isDocumentsPending, isDocumentsRejected } = ctx;
-
-  const tasks = buildDocumentTasks(ctx);
-  return (
-    <StepShell
-      compact={compact}
-      progress={{ done: tasks.filter((x) => x.state === "done").length, total: tasks.length }}
-      index="1"
-      state={isStep1Done ? "done" : !isRegistrationDone ? "locked" : "current"}
-      kicker="Korak 1"
-      title="Profil i dokumenta"
-      description="Sve što sponzor i poslodavac traže, redom. Uverenja prevodiš na engleski ovde, u portalu."
-      status={
-        <StatusPill tone={isStep1Done ? "done" : isDocumentsRejected ? "danger" : isDocumentsPending ? "wait" : "neutral"}>
-          {isStep1Done
-            ? "Odobreno"
-            : isDocumentsRejected
-            ? "Treba dopuna"
-            : isDocumentsPending
-            ? "Na pregledu"
-            : !isRegistrationDone
-            ? "Otvara se posle registracije"
-            : "U toku"}
-        </StatusPill>
-      }
-    >
-      {isDocumentsRejected && (
-        <Notice tone="danger" title="Koordinator je vratio dosije na dopunu">
-          „{candidate.documentsRejectionReason || "Priloži ispravan ili dopunjen dokument prema uputstvu."}“
-          {candidate.documentsRejectedAt && (
-            <span className="ml-1 opacity-75">— {new Date(candidate.documentsRejectedAt).toLocaleDateString("sr-RS")}</span>
-          )}
-        </Notice>
-      )}
-      <StageTasks tasks={tasks} quiet={quiet} goTo={ctx.goTo} />
-    </StepShell>
-  );
 }

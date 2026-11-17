@@ -3,7 +3,7 @@
 import { Button } from "../ui";
 import { getOfferedJobsForCandidate } from "../../data/jobsStore";
 import { jobOfferState } from "../../data/candidateStore";
-import { StepShell, StageTasks, Actions, LinkButton, StatusPill, RemoveFileButton } from "./ui";
+import { Actions, LinkButton, RemoveFileButton } from "./ui";
 
 export const JOB_OFFER_STATUS = {
   locked: "Posle intervjua",
@@ -245,29 +245,4 @@ export function buildJobTasks(ctx) {
   }
 
   return tasks;
-}
-
-export default function Step2JobPlacement({ ctx, quiet, compact }) {
-  const { candidate, isDocumentsApproved, isStep2Done, isSecondInstallmentPending } = ctx;
-  const isFull = candidate.paymentMethod === "now" || candidate.isFullPaymentPaid;
-
-  const tasks = buildJobTasks(ctx);
-  return (
-    <StepShell
-      compact={compact}
-      progress={{ done: tasks.filter((x) => x.state === "done").length, total: tasks.length }}
-      index="2"
-      state={isStep2Done ? "done" : !isDocumentsApproved ? "locked" : "current"}
-      kicker="Korak 2"
-      title={isFull ? "Posao i Job Offer" : "Posao, Job Offer i II rata"}
-      description="Biraš posao, razgovaraš sa poslodavcem, a potpisan Job Offer okačiš ovde."
-      status={
-        <StatusPill tone={isStep2Done ? "done" : isSecondInstallmentPending ? "wait" : "neutral"}>
-          {isStep2Done ? "Završeno" : isSecondInstallmentPending ? "Čeka našu potvrdu" : !isDocumentsApproved ? "Otvara se posle Koraka 1" : "U toku"}
-        </StatusPill>
-      }
-    >
-      <StageTasks tasks={tasks} quiet={quiet} goTo={ctx.goTo} />
-    </StepShell>
-  );
 }

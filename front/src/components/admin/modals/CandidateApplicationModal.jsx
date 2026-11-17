@@ -1,6 +1,5 @@
 // front/src/components/admin/modals/CandidateApplicationModal.jsx
-import { useState, useEffect } from "react";
-import { useTranslation } from "../../../i18n/LanguageContext";
+import { useState, useEffect, useRef } from "react";
 import {
   PROGRAM_PACKAGES,
   getPromotions,
@@ -31,12 +30,11 @@ import { FIELD_CLS, STATUS_FLOW, PlusIcon, XIcon, Modal, Field } from "../ui";
 import { Button } from "../../ui";
 import { TaskIcon, DataList, cardCls } from "../../dashboard/ui";
 
-export default function CandidateApplicationModal({ candidate, onSave, onSaved, onClose }) {
-  const { t } = useTranslation();
+export default function CandidateApplicationModal({ candidate, onSave, onSaved, onClose, initialTab = "overview" }) {
   const promotions = getPromotions();
 
   // Odredi početni tab na osnovu trenutnog koraka kandidata kako admin odmah vidi aktuelni korak
-  const getInitialTab = () => "overview";
+  const getInitialTab = () => initialTab || "overview";
 
   const [activeTab, setActiveTab] = useState(getInitialTab);
 
@@ -938,6 +936,18 @@ export default function CandidateApplicationModal({ candidate, onSave, onSaved, 
   const av = prof.availability || {};
   const pref = prof.preferences || {};
 
+  // Gde je kandidat u procesu (0 Registracija … 3 Korak 3, 4 viza odobrena).
+  const stageIndex = { review: 0, registered: 0, applying: 0, in_review: 1, docs: 1, job: 2, departure: 3, ready: 4 }[status] ?? 0;
+
+  // Nesačuvane izmene: poredi trenutna polja sa poslednjim sačuvanim stanjem kandidata.
+  const snapshotNow = (() => {
+    const { registeredAt: _r, ...rest } = buildUpdatedCandidate();
+    return JSON.stringify(rest);
+  })();
+  const baselineRef = useRef({ candidate: null, snapshot: "" });
+  if (baselineRef.current.candidate !== candidate) baselineRef.current = { candidate, snapshot: snapshotNow };
+  const isDirty = snapshotNow !== baselineRef.current.snapshot;
+
   return (
     <Modal
       title={`Dosije: ${firstName} ${lastName}`.trim()}
@@ -960,16 +970,31 @@ export default function CandidateApplicationModal({ candidate, onSave, onSaved, 
       }
       footer={
         <>
-          <p className="hidden text-[13px] text-ink-3 sm:block">
-            <span className="font-medium text-ink">{stepInfo.stepTitle}</span> · {stepInfo.subLabel}
-          </p>
+          {isDirty ? (
+            <p className="flex items-center gap-2 text-[13px] font-medium text-amber-800">
+              <span className="h-2 w-2 rounded-full bg-amber-400" aria-hidden="true" />
+              Imaš nesačuvane izmene
+            </p>
+          ) : (
+            <p className="hidden text-[13px] text-ink-3 sm:block">
+              <span className="font-medium text-ink">{stepInfo.stepTitle}</span> · {stepInfo.subLabel}
+            </p>
+          )}
           <div className="ml-auto flex items-center gap-2">
-            <Button variant="ghost" onClick={onClose}>
-              {t("admin.modalCancel")}
-            </Button>
-            <Button variant="dark" onClick={handleSubmit}>
-              Sačuvaj izmene
-            </Button>
+            {isDirty ? (
+              <>
+                <Button variant="ghost" onClick={onClose}>
+                  Odbaci
+                </Button>
+                <Button variant="dark" onClick={handleSubmit}>
+                  Sačuvaj izmene
+                </Button>
+              </>
+            ) : (
+              <Button variant="outline" onClick={onClose}>
+                Zatvori
+              </Button>
+            )}
           </div>
         </>
       }
@@ -1005,7 +1030,7 @@ export default function CandidateApplicationModal({ candidate, onSave, onSaved, 
         </div>
       </nav>
 
-      <form onSubmit={handleSubmit} className="min-h-0 flex-1 space-y-4 overflow-y-auto bg-surface px-4 py-5 sm:px-8 sm:py-7">
+      <form onSubmit={handleSubmit} className="min-h-0 flex-1 space-y-10 overflow-y-auto bg-white px-4 py-5 sm:px-10 sm:py-8">
         <h3 className="text-xl font-semibold text-ink [font-stretch:100%] tracking-[-0.015em]">{activeTabInfo.label}</h3>
 
         {adminToast && (
@@ -1019,7 +1044,7 @@ export default function CandidateApplicationModal({ candidate, onSave, onSaved, 
 
         {/* =================== PREGLED =================== */}
         {activeTab === "overview" && (
-          <div className="space-y-4">
+          <div className="space-y-10">
             <Section title="Čeka tebe" aside={<span className="text-[13px] text-ink-3">{queue.length || "Ništa"}</span>}>
               {queue.length === 0 ? (
                 <p className="text-sm text-ink-3">Nema ničeg na čekanju — red je na kandidatu.</p>
@@ -1095,7 +1120,7 @@ export default function CandidateApplicationModal({ candidate, onSave, onSaved, 
 
         {/* =================== DOKUMENTA =================== */}
         {activeTab === "docs" && (
-          <div className="space-y-4">
+          <div className="space-y-10">
             <Section
               title="Ugovor"
               aside={
@@ -1363,7 +1388,7 @@ export default function CandidateApplicationModal({ candidate, onSave, onSaved, 
 
         {/* =================== UPLATE =================== */}
         {activeTab === "pay" && (
-          <div className="space-y-4">
+          <div className="space-y-10">
             <dl className={`${cardCls} grid grid-cols-2 divide-line sm:grid-cols-4 sm:divide-x`}>
               {[
                 ["Za uplatu", finalPrice, null, "text-ink"],
@@ -1685,7 +1710,8 @@ export default function CandidateApplicationModal({ candidate, onSave, onSaved, 
             };
 
             return (
-              <div className="space-y-4">
+              <div className="space-y-10">
+                {stageIndex < 2 && <NotYetNote step="Korak 2" now={stepInfo.stepTitle} />}
                 <Section
                   title="Izabrani posao"
                   aside={
@@ -1890,7 +1916,8 @@ export default function CandidateApplicationModal({ candidate, onSave, onSaved, 
 
         {/* =================== VIZA I LET =================== */}
         {activeTab === "visa" && (
-          <div className="space-y-4">
+          <div className="space-y-10">
+            {stageIndex < 3 && <NotYetNote step="Korak 3" now={stepInfo.stepTitle} />}
             <Section title="DS-2019 i ambasada">
               <div className="grid gap-3.5 sm:grid-cols-2">
                 <Field label="DS-2019">
@@ -1937,7 +1964,9 @@ export default function CandidateApplicationModal({ candidate, onSave, onSaved, 
               aside={<StatusText state={hasVisa ? "done" : "wait"}>{hasVisa ? "Odobrena" : "Čeka razgovor"}</StatusText>}
               hint="Kad ambasada odobri J-1 vizu, potvrdi je ovde — kandidat dobija status Viza odobrena."
             >
-              {!hasVisa ? (
+              {!hasVisa && stageIndex < 3 ? (
+                <p className="text-[13px] text-ink-3">Vizu potvrđuješ kad kandidat stigne do Koraka 3.</p>
+              ) : !hasVisa ? (
                 <Button
                   variant="dark"
                   onClick={() => {
@@ -1985,13 +2014,34 @@ export default function CandidateApplicationModal({ candidate, onSave, onSaved, 
                   </Toggle>
                 </div>
               </div>
+              <div className="mt-5 flex flex-wrap items-center gap-3 border-t border-line pt-4">
+                <Button
+                  size="sm"
+                  variant="dark"
+                  onClick={async () => {
+                    const ok = await onSave(
+                      buildUpdatedCandidate({
+                        orientationAttended: Boolean(orientationAttended),
+                        flightDepartureDate,
+                        flightReturnDate,
+                        flightTicketStatus,
+                      }),
+                      { keepOpen: true }
+                    );
+                    if (ok !== false) showToast("Let i orijentacija su sačuvani. Kandidat ih vidi u svojoj aplikaciji.");
+                  }}
+                >
+                  Sačuvaj let i orijentaciju
+                </Button>
+                <span className="text-[13px] text-ink-3">Kandidat vidi orijentaciju, kartu i datume leta u Koraku 3.</span>
+              </div>
             </Section>
           </div>
         )}
 
         {/* =================== PODACI =================== */}
         {activeTab === "data" && (
-          <div className="space-y-4">
+          <div className="space-y-10">
             <Section title="Lični podaci" hint="Isti podaci idu u ugovor i DS-160.">
               <div className="grid gap-3.5 sm:grid-cols-3">
                 <Field label="Ime">
@@ -2121,7 +2171,7 @@ export default function CandidateApplicationModal({ candidate, onSave, onSaved, 
 
         {/* =================== BELEŠKE =================== */}
         {activeTab === "notes" && (
-          <div className="space-y-4">
+          <div className="space-y-10">
             <Section title="Selekcija">
               <div className="grid gap-3.5 sm:grid-cols-3">
                 <Field label="Prvi kontakt">
@@ -2311,11 +2361,12 @@ const linkCls = "text-[13px] font-medium text-ink underline decoration-line-stro
 
 function Section({ title, hint, aside, children, className = "" }) {
   return (
-    <section className={`${cardCls} p-5 sm:p-6 ${className}`}>
+    // Sekcija na beloj strani: naslov, linija, sadržaj (bez kartice).
+    <section className={`border-t border-line pt-5 ${className}`}>
       {(title || aside) && (
         <div className="mb-4">
           <div className="flex items-center justify-between gap-4">
-            {title && <h4 className="text-base font-semibold text-ink">{title}</h4>}
+            {title && <h4 className="text-[17px] font-semibold text-ink">{title}</h4>}
             {aside}
           </div>
           {hint && <p className="mt-1 text-[13px] leading-relaxed text-ink-3">{hint}</p>}
@@ -2326,11 +2377,24 @@ function Section({ title, hint, aside, children, className = "" }) {
   );
 }
 
+// Tab za korak do kog kandidat još nije stigao: polja mogu unapred, ali je jasno da nije na redu.
+function NotYetNote({ step, now }) {
+  return (
+    <p className="rounded-xl bg-surface-2 px-4 py-3 text-[13px] text-ink-2">
+      Kandidat je sada u koraku <span className="font-medium text-ink">{now}</span>. {step} dolazi kasnije — ovde možeš samo da upišeš podatke unapred.
+    </p>
+  );
+}
+
 // Šta znače statusi (isti rečnik u celom adminu, vidi reviewStatus.js).
 function StatusLegend() {
   return (
-    <section className={`${cardCls} px-5 py-4`} aria-label="Šta znače statusi">
-      <ul className="flex flex-wrap gap-x-6 gap-y-2 text-[13px] text-ink-3">
+    <details className="group text-[13px] text-ink-3">
+      <summary className="inline-flex cursor-pointer list-none items-center gap-1.5 hover:text-ink">
+        <span aria-hidden="true" className="transition-transform group-open:rotate-90">›</span>
+        Šta znače statusi?
+      </summary>
+      <ul className="mt-2.5 flex flex-wrap gap-x-6 gap-y-2">
         {[
           [REVIEW.review, "kandidat je poslao, red je na tebi"],
           [REVIEW.approved, "ti si potvrdio"],
@@ -2345,7 +2409,7 @@ function StatusLegend() {
           </li>
         ))}
       </ul>
-    </section>
+    </details>
   );
 }
 
